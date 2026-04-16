@@ -1,61 +1,37 @@
-//
-//  ContentView.swift
-//  SmarterTraining
-//
-//  Created by Tim Foran on 4/14/26.
-//
-
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @Environment(AppState.self) private var appState
+    @State private var showingSplash = true
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
-            }
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
+        ZStack {
+            if showingSplash {
+                SplashView()
+                    .transition(.opacity)
+            } else if !appState.hasCompletedOnboarding {
+                OnboardingFlowView()
+                    .transition(.opacity)
+            } else {
+                if appState.hasCheckedInToday {
+                    TodayView()
+                        .transition(.opacity)
+                } else {
+                    CheckInView(context: appState.checkInContext)
+                        .transition(.opacity)
                 }
             }
-        } detail: {
-            Text("Select an item")
         }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
-            }
+        .animation(.easeOut(duration: 0.25), value: showingSplash)
+        .animation(.easeOut(duration: 0.25), value: appState.hasCompletedOnboarding)
+        .task {
+            try? await Task.sleep(for: .milliseconds(800))
+            showingSplash = false
         }
     }
 }
 
 #Preview {
     ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+        .environment(AppState())
 }

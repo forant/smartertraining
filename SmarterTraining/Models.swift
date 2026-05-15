@@ -234,7 +234,7 @@ final class AppState {
         }
     }
 
-    // DEBUG ONLY — remove before production
+    #if DEBUG
     func resetToday() {
         latestCheckIn = nil
         lastCheckInDate = nil
@@ -244,7 +244,6 @@ final class AppState {
         defaults.removeObject(forKey: Keys.checkInDate)
     }
 
-    // DEBUG ONLY — remove before production
     func resetOnboarding() {
         hasCompletedOnboarding = false
         userProfile = .empty
@@ -252,7 +251,6 @@ final class AppState {
         defaults.removeObject(forKey: Keys.userProfile)
     }
 
-    // DEBUG ONLY — remove before production
     func debugSeedWorkout(type: WorkoutType) {
         let daysBack = recentHistory.count + 1
         let date = Calendar.current.date(byAdding: .day, value: -daysBack, to: Date()) ?? Date()
@@ -271,10 +269,10 @@ final class AppState {
         }
     }
 
-    // DEBUG ONLY — remove before production
     func debugClearHistory() {
         recentHistory.removeAll()
     }
+    #endif
 
     private func appendToHistory(recommendation: WorkoutRecommendation, checkIn: CheckIn) {
         let entry = WorkoutHistoryEntry(

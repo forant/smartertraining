@@ -4,6 +4,7 @@ struct TodayView: View {
     @Environment(AppState.self) private var appState
     @State private var showingCheckIn = false
     @State private var showingHistory = false
+    @State private var showingRideSession = false
 
     var body: some View {
         NavigationStack {
@@ -11,6 +12,7 @@ struct TodayView: View {
                 VStack(spacing: 24) {
                     header
                     WorkoutHeroCard(recommendation: appState.currentRecommendation)
+                    startWorkoutButton
                     coachCallout
 
                     if !appState.currentRecommendation.optionalExtras.isEmpty {
@@ -27,7 +29,9 @@ struct TodayView: View {
                     )
 
                     actionButtons
+                    #if DEBUG
                     debugSection
+                    #endif
                 }
                 .padding()
             }
@@ -37,6 +41,12 @@ struct TodayView: View {
             }
             .sheet(isPresented: $showingHistory) {
                 HistoryView()
+            }
+            .fullScreenCover(isPresented: $showingRideSession) {
+                RideSessionView(
+                    recommendation: appState.currentRecommendation,
+                    ftp: appState.userProfile.ftp
+                )
             }
         }
     }
@@ -78,6 +88,29 @@ struct TodayView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
+    // MARK: - Start Workout
+
+    private var hasCyclingSteps: Bool {
+        appState.currentRecommendation.steps.contains { $0.modality == .cycling }
+    }
+
+    @ViewBuilder
+    private var startWorkoutButton: some View {
+        if hasCyclingSteps {
+            Button {
+                showingRideSession = true
+            } label: {
+                Label("Start Workout", systemImage: "figure.indoor.cycle")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(.green)
+        }
+    }
+
     // MARK: - Action Buttons
 
     private var actionButtons: some View {
@@ -106,7 +139,7 @@ struct TodayView: View {
         .padding(.top, 4)
     }
 
-    // DEBUG ONLY — remove before production
+    #if DEBUG
     private var debugSection: some View {
         VStack(spacing: 8) {
             Divider()
@@ -146,6 +179,7 @@ struct TodayView: View {
         }
         .padding(.top, 16)
     }
+    #endif
 }
 
 // MARK: - Workout Hero Card

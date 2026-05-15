@@ -216,9 +216,11 @@ struct RideSessionView: View {
         VStack(spacing: 0) {
             ergStatusBanner(runtime)
             metricsDisplay(runtime)
+            cadenceWarning(runtime)
             Divider()
             stepInfo(runtime)
             Spacer()
+            midRideERGToggle(runtime)
             rideControls(runtime)
         }
         .padding()
@@ -237,6 +239,9 @@ struct RideSessionView: View {
             if case .error = newState, runtime.state == .running {
                 runtime.pause()
             }
+        }
+        .onChange(of: ergToggle) { _, newValue in
+            runtime.ergEnabled = newValue
         }
     }
 
@@ -343,16 +348,18 @@ struct RideSessionView: View {
                 Text("TARGET")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                Text("\(runtime.targetPower ?? 0)")
+                Text("\(runtime.displayTargetPower ?? 0)")
                     .font(.system(size: 48, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.accentColor)
+                    .contentTransition(.numericText())
+                    .animation(.easeInOut(duration: 0.3), value: runtime.displayTargetPower)
                 Text("watts")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 20) {
-                metricBox("POWER", value: manager.metrics.power.map { "\($0)" } ?? "--", unit: "W")
+                metricBox("POWER", value: runtime.smoothedPower.map { "\($0)" } ?? "--", unit: "W")
                 metricBox("HR", value: effectiveHeartRate.map { "\($0)" } ?? "--", unit: "bpm")
                 metricBox("CADENCE", value: manager.metrics.cadence.map { "\(Int($0))" } ?? "--", unit: "rpm")
                 metricBox("SPEED", value: manager.metrics.speed.map { String(format: "%.1f", $0) } ?? "--", unit: "km/h")
@@ -549,6 +556,54 @@ struct RideSessionView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Cadence Warning
+
+    @ViewBuilder
+    private func cadenceWarning(_ runtime: TrainerWorkoutRuntime) -> some View {
+        if case .low(let rpm) = runtime.cadenceStatus {
+            HStack(spacing: 8) {
+                Image(systemName: "metronome")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Text("Cadence low (\(rpm) rpm) \u{2014} try to stay above 75 rpm")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .transition(.opacity.combined(with: .move(edge: .top)))
+            .animation(.easeInOut(duration: 0.3), value: runtime.cadenceStatus)
+        }
+    }
+
+    // MARK: - Mid-Ride ERG Toggle
+
+    private func midRideERGToggle(_ runtime: TrainerWorkoutRuntime) -> some View {
+        HStack {
+            Toggle(isOn: $ergToggle) {
+                HStack(spacing: 6) {
+                    Image(systemName: ergToggle ? "bolt.fill" : "bolt.slash")
+                        .font(.caption)
+                        .foregroundStyle(ergToggle ? .green : .secondary)
+                    Text(ergToggle ? "ERG on" : "ERG off")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .tint(.green)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.bottom, 8)
     }
 
     // MARK: - Helpers

@@ -45,7 +45,7 @@ struct SettingsView: View {
             Text("Account")
         } footer: {
             if !appState.auth.isSignedIn {
-                Text("Sync your training history across devices.")
+                Text("Keep your training history backed up and synced across devices.")
             }
         }
     }
@@ -53,14 +53,19 @@ struct SettingsView: View {
     private var signedInContent: some View {
         Group {
             HStack {
-                Label("Signed In", systemImage: "person.crop.circle.fill")
-                Spacer()
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-            }
-
-            HStack {
-                Label(appState.sync.status.displayText, systemImage: syncIcon)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("Signed in")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+                    syncSummaryText
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
                 Spacer()
                 if case .syncing = appState.sync.status {
                     ProgressView()
@@ -68,25 +73,33 @@ struct SettingsView: View {
                 }
             }
 
-            if let lastSynced = appState.sync.lastSyncedAt {
-                HStack {
-                    Text("Last synced")
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(lastSynced.formatted(.relative(presentation: .named)))
-                        .foregroundStyle(.tertiary)
-                }
-                .font(.subheadline)
-            }
-
-            Button("Sync Now") {
+            Button("Sync now") {
                 appState.triggerSync()
             }
 
-            Button("Sign Out", role: .destructive) {
+            Button("Sign out", role: .destructive) {
                 appState.auth.signOut()
                 appState.sync.updateAuthStatus()
             }
+        }
+    }
+
+    @ViewBuilder
+    private var syncSummaryText: some View {
+        switch appState.sync.status {
+        case .synced:
+            if let lastSynced = appState.sync.lastSyncedAt {
+                Text("Synced \(lastSynced.formatted(.relative(presentation: .named)))")
+            } else {
+                Text("Synced")
+            }
+        case .syncing:
+            Text("Syncing\u{2026}")
+        case .error(let msg):
+            Text(msg)
+                .foregroundStyle(.red)
+        default:
+            Text("Ready to sync")
         }
     }
 
@@ -121,16 +134,6 @@ struct SettingsView: View {
         }
     }
 
-    private var syncIcon: String {
-        switch appState.sync.status {
-        case .notSignedIn: "arrow.triangle.2.circlepath"
-        case .idle: "arrow.triangle.2.circlepath"
-        case .syncing: "arrow.triangle.2.circlepath.circle"
-        case .synced: "checkmark.circle.fill"
-        case .error: "exclamationmark.triangle"
-        }
-    }
-
     // MARK: - Integrations
 
     private var integrationsSection: some View {
@@ -144,26 +147,42 @@ struct SettingsView: View {
         Group {
             if stravaAuth.isConnected {
                 HStack {
-                    Label(stravaAuth.athleteName ?? "Strava", systemImage: "figure.run")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Strava")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Text(stravaAuth.athleteName.map { "Connected as \($0)" } ?? "Connected")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
                     Spacer()
-                    Text("Connected")
-                        .font(.subheadline)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption)
                         .foregroundStyle(.green)
                 }
 
-                Button("Disconnect Strava", role: .destructive) {
+                Button("Disconnect", role: .destructive) {
                     stravaAuth.disconnect()
                 }
+                .font(.subheadline)
             } else if StravaConfig.isConfigured {
                 HStack {
-                    Label("Strava", systemImage: "figure.run")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Strava")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Text("Auto-upload finished rides")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                     Spacer()
-                    Text("Not connected")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    if isAuthorizingStrava {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
                 }
 
-                Button {
+                Button("Connect to Strava") {
                     Task {
                         isAuthorizingStrava = true
                         stravaError = nil
@@ -174,17 +193,9 @@ struct SettingsView: View {
                         }
                         isAuthorizingStrava = false
                     }
-                } label: {
-                    HStack {
-                        Text("Connect to Strava")
-                        if isAuthorizingStrava {
-                            Spacer()
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
                 }
                 .disabled(isAuthorizingStrava)
+                .font(.subheadline)
 
                 if let stravaError {
                     Text(stravaError)
@@ -193,10 +204,12 @@ struct SettingsView: View {
                 }
             } else {
                 HStack {
-                    Label("Strava", systemImage: "figure.run")
+                    Text("Strava")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
                     Spacer()
                     Text("Not configured")
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -207,22 +220,29 @@ struct SettingsView: View {
         Group {
             if healthKit.isAvailable {
                 HStack {
-                    Label("Apple Health", systemImage: "heart.fill")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Apple Health")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        Text("Heart rate and workout saving")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                     Spacer()
-                    Text("Available")
-                        .font(.subheadline)
-                        .foregroundStyle(.green)
                 }
 
-                Button("Request Permissions") {
+                Button("Grant permissions") {
                     Task { await healthKit.requestAuthorization() }
                 }
+                .font(.subheadline)
             } else {
                 HStack {
-                    Label("Apple Health", systemImage: "heart.fill")
+                    Text("Apple Health")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
                     Spacer()
                     Text("Not available")
-                        .font(.subheadline)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
                 }
             }
@@ -232,38 +252,30 @@ struct SettingsView: View {
     // MARK: - Training Data
 
     private var trainingDataSection: some View {
-        Section("Training Data") {
-            HStack {
-                Text("Workouts")
-                Spacer()
-                Text("\(appState.recentHistory.count)")
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Text("Finished rides")
-                Spacer()
-                Text("\(appState.store.finishedRides().count)")
-                    .foregroundStyle(.secondary)
-            }
+        Section {
+            dataRow("Workouts", value: "\(appState.recentHistory.count)")
+            dataRow("Finished rides", value: "\(appState.store.finishedRides().count)")
 
             if appState.auth.isSignedIn {
                 let summary = appState.store.syncMetadataSummary()
-                HStack {
-                    Text("Synced")
-                    Spacer()
-                    Text("\(summary.syncedCount)")
-                        .foregroundStyle(.secondary)
-                }
+                dataRow("Synced", value: "\(summary.syncedCount)")
                 if summary.failedCount > 0 {
-                    HStack {
-                        Text("Failed")
-                        Spacer()
-                        Text("\(summary.failedCount)")
-                            .foregroundStyle(.red)
-                    }
+                    dataRow("Failed", value: "\(summary.failedCount)", valueColor: .red)
                 }
             }
+        } header: {
+            Text("Training data")
+        }
+    }
+
+    private func dataRow(_ label: String, value: String, valueColor: Color = .secondary) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+            Spacer()
+            Text(value)
+                .font(.subheadline)
+                .foregroundStyle(valueColor)
         }
     }
 
@@ -273,16 +285,16 @@ struct SettingsView: View {
         Section {
             HStack {
                 Text("Version")
+                    .font(.subheadline)
                 Spacer()
                 Text("\(appVersion) (\(buildNumber))")
-                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
             }
-
+        } footer: {
             Text("Training for people with real lives.")
-                .font(.subheadline)
-                .foregroundStyle(.tertiary)
-        } header: {
-            Text("About")
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
         }
     }
 

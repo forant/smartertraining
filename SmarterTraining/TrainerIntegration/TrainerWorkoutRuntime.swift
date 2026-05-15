@@ -20,10 +20,44 @@ final class TrainerWorkoutRuntime {
     private(set) var startDate: Date?
 
     // ERG
-    var ergEnabled: Bool = false
+    var ergEnabled: Bool = false {
+        didSet {
+            if ergEnabled && state == .running {
+                attemptERGIfEnabled()
+                trySendERGTarget(force: true)
+            } else if !ergEnabled {
+                if ergState == .active {
+                    trainerManager?.send(.stop)
+                }
+                transitionERG(to: .off)
+                rampController.completeRamp()
+                lastTargetSent = nil
+            }
+        }
+    }
     private(set) var ergState: ERGState = .off
     private var ergAttemptDate: Date?
     private static let ergTimeout: TimeInterval = 8
+
+    // Ramp
+    private(set) var rampController = ERGRampController()
+    private var lastRampCommandDate: Date?
+
+    // Display
+    private(set) var powerSmoother = PowerSmoother()
+    private(set) var cadenceGuidance = CadenceGuidance()
+    private(set) var cadenceStatus: CadenceGuidance.Status = .ok
+
+    var smoothedPower: Int? {
+        powerSmoother.smoothed()
+    }
+
+    var displayTargetPower: Int? {
+        if rampController.isRamping, let ramped = rampController.currentTarget() {
+            return ramped
+        }
+        return targetPower
+    }
 
     private var timer: Timer?
     private weak var trainerManager: FTMSManager?
@@ -72,7 +106,7 @@ final class TrainerWorkoutRuntime {
         if startDate == nil { startDate = Date() }
         state = .running
         attemptERGIfEnabled()
-        trySendERGTarget()
+        trySendERGTarget(force: true)
         startTimer()
     }
 
@@ -98,6 +132,7 @@ final class TrainerWorkoutRuntime {
         }
         ergState = ergEnabled ? ergState : .off
         lastTargetSent = nil
+        rampController.completeRamp()
     }
 
     // MARK: - ERG
@@ -138,7 +173,7 @@ final class TrainerWorkoutRuntime {
 
         if manager.controlAcquired {
             transitionERG(to: .active)
-            trySendERGTarget()
+            trySendERGTarget(force: true)
             return
         }
 
@@ -147,7 +182,7 @@ final class TrainerWorkoutRuntime {
         }
     }
 
-    private func trySendERGTarget() {
+    private func trySendERGTarget(force: Bool = false) {
         guard ergEnabled, ergState == .active || ergState == .enabling else { return }
         guard let manager = trainerManager else { return }
         guard let watts = targetPower else { return }
@@ -156,20 +191,34 @@ final class TrainerWorkoutRuntime {
             return
         }
 
-        guard watts != lastTargetSent else { return }
-        let clamped = max(0, min(Int16.max, Int16(watts)))
+        if !force && watts == lastTargetSent && !rampController.isRamping {
+            return
+        }
+
+        let commandWatts: Int
+        if rampController.isRamping, let ramped = rampController.currentTarget() {
+            commandWatts = ramped
+        } else {
+            commandWatts = watts
+        }
+
+        let clamped = max(0, min(Int16.max, Int16(commandWatts)))
         manager.send(.setTargetPower(watts: clamped))
-        lastTargetSent = watts
+        lastTargetSent = rampController.isRamping ? nil : watts
 
         #if DEBUG
-        print("[ERG] Target power set to \(watts)W")
+        if rampController.isRamping {
+            print("[ERG] Ramp target: \(commandWatts)W (final: \(watts)W)")
+        } else {
+            print("[ERG] Target power set to \(watts)W")
+        }
         #endif
     }
 
     private func transitionERG(to newState: ERGState) {
         guard ergState != newState else { return }
         #if DEBUG
-        print("[ERG] \(ergState.label) → \(newState.label)")
+        print("[ERG] \(ergState.label) \u{2192} \(newState.label)")
         #endif
         ergState = newState
     }
@@ -195,6 +244,8 @@ final class TrainerWorkoutRuntime {
         totalElapsed += 1
         captureSample()
         updateERGState()
+        updateRamp()
+        updateCadence()
 
         if let step = currentStep, stepElapsed >= step.duration {
             advanceStep()
@@ -202,6 +253,7 @@ final class TrainerWorkoutRuntime {
     }
 
     private func advanceStep() {
+        let previousTarget = currentStep?.targetPower
         let nextIndex = currentStepIndex + 1
         if nextIndex >= steps.count {
             finish()
@@ -209,8 +261,50 @@ final class TrainerWorkoutRuntime {
         }
         currentStepIndex = nextIndex
         stepElapsed = 0
+        cadenceGuidance.reset()
+        cadenceStatus = .ok
+
+        if let prev = previousTarget, let next = currentStep?.targetPower {
+            rampController.beginRamp(from: prev, to: next)
+            lastRampCommandDate = nil
+        }
         lastTargetSent = nil
-        trySendERGTarget()
+        trySendERGTarget(force: true)
+    }
+
+    // MARK: - Ramp
+
+    private func updateRamp() {
+        guard rampController.isRamping else { return }
+        guard ergEnabled, ergState == .active else {
+            rampController.completeRamp()
+            return
+        }
+
+        let now = Date()
+        let shouldSend = lastRampCommandDate == nil ||
+            now.timeIntervalSince(lastRampCommandDate!) >= rampController.commandInterval
+
+        if shouldSend {
+            trySendERGTarget(force: true)
+            lastRampCommandDate = now
+        }
+
+        if !rampController.isRamping {
+            rampController.completeRamp()
+            lastRampCommandDate = nil
+        }
+    }
+
+    // MARK: - Display Helpers
+
+    private func updateCadence() {
+        guard let step = currentStep else { return }
+        cadenceStatus = cadenceGuidance.update(
+            cadence: trainerManager?.metrics.cadence,
+            stepRole: step.role,
+            stepElapsed: stepElapsed
+        )
     }
 
     private func captureSample() {
@@ -218,5 +312,9 @@ final class TrainerWorkoutRuntime {
         let m = manager.metrics
         guard m.timestamp != .distantPast else { return }
         samples.append(m)
+
+        if let watts = m.power {
+            powerSmoother.add(watts, at: m.timestamp)
+        }
     }
 }

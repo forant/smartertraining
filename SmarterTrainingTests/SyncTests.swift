@@ -464,6 +464,73 @@ struct CompletedWorkoutHealthKitTests {
     }
 }
 
+// MARK: - AI Coach Explanation Tests
+
+struct AICoachExplanationTests {
+
+    @Test func parsesFullResponse() throws {
+        let json = """
+        {
+            "coach_explanation": "Steady aerobic work fits today.",
+            "continuity_note": "Building on yesterday's recovery.",
+            "tomorrow_implication": "Sets up a quality session tomorrow.",
+            "confidence": "high",
+            "is_fallback": false
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let result = try decoder.decode(AICoachExplanation.self, from: Data(json.utf8))
+
+        #expect(result.coachExplanation == "Steady aerobic work fits today.")
+        #expect(result.continuityNote == "Building on yesterday's recovery.")
+        #expect(result.tomorrowImplication == "Sets up a quality session tomorrow.")
+        #expect(result.confidence == "high")
+        #expect(result.isFallback == false)
+    }
+
+    @Test func parsesMinimalResponse() throws {
+        let json = """
+        {
+            "coach_explanation": "Recovery day.",
+            "continuity_note": null,
+            "tomorrow_implication": null,
+            "confidence": "low",
+            "is_fallback": true
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let result = try decoder.decode(AICoachExplanation.self, from: Data(json.utf8))
+
+        #expect(result.coachExplanation == "Recovery day.")
+        #expect(result.continuityNote == nil)
+        #expect(result.tomorrowImplication == nil)
+        #expect(result.isFallback == true)
+    }
+
+    @Test func fallbackPreservesDeterministicReason() {
+        let recommendation = WorkoutRecommendation(
+            type: .endurance,
+            title: "Zone 2 Ride",
+            summary: "Aerobic base",
+            reason: "Deterministic fallback reason.",
+            steps: [],
+            optionalExtras: []
+        )
+        let service = AICoachService()
+        #expect(service.explanation == nil)
+        #expect(recommendation.reason == "Deterministic fallback reason.")
+    }
+
+    @Test func cacheInvalidationClearsExplanation() {
+        let service = AICoachService()
+        service.invalidateCache()
+        #expect(service.explanation == nil)
+        #expect(service.isLoading == false)
+    }
+}
+
 // MARK: - Sync Status Tests
 
 struct SyncStatusTests {

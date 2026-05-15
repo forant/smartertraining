@@ -50,3 +50,24 @@ class SyncRecordOut(BaseModel):
 class SyncResponse(BaseModel):
     server_time: datetime
     records: List[SyncRecordOut]
+
+
+# --- Coach ---
+
+
+class CoachExplanationRequest(BaseModel):
+    recommendation: Dict
+    check_in: Optional[Dict] = None
+    training_memory: Optional[Dict] = None
+    recent_activities: Optional[List[Dict]] = None
+    life_context: Optional[List[str]] = None
+    last_feedback: Optional[str] = None
+    edited_workout: bool = False
+
+
+class CoachExplanationResponse(BaseModel):
+    coach_explanation: str
+    continuity_note: Optional[str] = None
+    tomorrow_implication: Optional[str] = None
+    confidence: str = "high"
+    is_fallback: bool = False

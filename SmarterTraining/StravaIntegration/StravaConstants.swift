@@ -7,7 +7,7 @@ enum StravaConfig {
     static let clientSecret = "fb177ea743a7372eb357d17b6cec09f67d9f7b7c"
 
     static let callbackScheme = "smartertraining"
-    static let redirectURI = "smartertraining://strava"
+    static let redirectURI = "smartertraining://smartertraining"
     static let scope = "activity:write"
 
     static let authBaseURL = "https://www.strava.com/oauth/authorize"

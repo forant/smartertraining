@@ -8,6 +8,7 @@ struct TodayView: View {
     @State private var showingEditor = false
     @State private var showingSettings = false
     @State private var editor: WorkoutEditor?
+    @State private var aiCoach = AICoachService()
 
     var body: some View {
         NavigationStack {
@@ -77,8 +78,12 @@ struct TodayView: View {
                     existingEditor: editor
                 )
             }
+            .task(id: appState.lastCheckInDate) {
+                await fetchAIExplanation()
+            }
             .onChange(of: appState.latestCheckIn?.timeAvailable) {
                 editor = nil
+                aiCoach.invalidateCache()
             }
         }
     }
@@ -102,22 +107,70 @@ struct TodayView: View {
 
     // MARK: - Coach Callout
 
-    private var coachCallout: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "brain.head.profile")
-                .font(.title3)
-                .foregroundStyle(.tint)
-                .frame(width: 32)
+    private var coachExplanationText: String {
+        if let ai = aiCoach.explanation, !ai.isFallback {
+            return ai.coachExplanation
+        }
+        return appState.currentRecommendation.reason
+    }
 
-            Text(appState.currentRecommendation.reason)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+    private var coachCallout: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "brain.head.profile")
+                    .font(.title3)
+                    .foregroundStyle(.tint)
+                    .frame(width: 32)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(coachExplanationText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if aiCoach.isLoading {
+                        Text("Thinking through your week\u{2026}")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            if let ai = aiCoach.explanation, !ai.isFallback {
+                if let note = ai.continuityNote {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 44)
+                }
+                if let tomorrow = ai.tomorrowImplication {
+                    Text(tomorrow)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .italic()
+                        .padding(.leading, 44)
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color.accentColor.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func fetchAIExplanation() async {
+        let summary = TrainingMemoryBuilder.build(
+            history: appState.recentHistory,
+            rides: appState.store.finishedRides()
+        )
+        await aiCoach.fetchExplanation(
+            recommendation: appState.currentRecommendation,
+            checkIn: appState.latestCheckIn,
+            memorySummary: summary,
+            lastFeedback: appState.todayFeedback,
+            editedWorkout: editor?.isModified == true,
+            auth: appState.auth
+        )
     }
 
     // MARK: - Start Workout

@@ -63,7 +63,12 @@ final class BackendAuthService {
 
         guard let httpResponse = response as? HTTPURLResponse,
               httpResponse.statusCode == 200 else {
-            throw AuthError.serverError
+            var detail = "Server authentication failed"
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let serverDetail = json["detail"] as? String {
+                detail = serverDetail
+            }
+            throw AuthError.serverError(detail)
         }
 
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -86,21 +91,21 @@ final class BackendAuthService {
 
     enum AuthError: Error, LocalizedError {
         case missingToken
-        case serverError
+        case serverError(String)
         case invalidResponse
 
         var errorDescription: String? {
             switch self {
             case .missingToken: "Missing identity token from Apple"
-            case .serverError: "Server authentication failed"
+            case .serverError(let detail): detail
             case .invalidResponse: "Invalid server response"
             }
         }
     }
 
     #if DEBUG
-    static var baseURL = "https://smartertraining-api.onrender.com"
+    static var baseURL = "https://smartertraining.onrender.com"
     #else
-    static let baseURL = "https://smartertraining-api.onrender.com"
+    static let baseURL = "https://smartertraining.onrender.com"
     #endif
 }

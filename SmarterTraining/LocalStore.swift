@@ -79,17 +79,18 @@ final class LocalStore {
     }
 
     func pendingSyncRecords() -> [SyncRecordEnvelope] {
-        let synced = loadSyncedKeys()
+        let metadata = loadSyncMetadata()
         var records: [SyncRecordEnvelope] = []
 
         for workout in loadWorkouts() {
-            let key = "workout:\(workout.id.uuidString)"
-            if !synced.contains(key) {
+            let key = syncKey(recordType: "workout", recordId: workout.id)
+            let recordUpdatedAt = workout.feedbackAt ?? workout.date
+            if needsSync(key: key, recordUpdatedAt: recordUpdatedAt, metadata: metadata) {
                 if let data = try? encoder.encode(workout) {
                     records.append(SyncRecordEnvelope(
                         recordType: "workout",
                         recordId: workout.id,
-                        updatedAt: workout.feedbackAt ?? workout.date,
+                        updatedAt: recordUpdatedAt,
                         payload: data
                     ))
                 }
@@ -97,13 +98,14 @@ final class LocalStore {
         }
 
         for ride in loadAllRides() {
-            let key = "ride:\(ride.id.uuidString)"
-            if !synced.contains(key) {
+            let key = syncKey(recordType: "ride", recordId: ride.id)
+            let recordUpdatedAt = ride.updatedAt ?? ride.startDate
+            if needsSync(key: key, recordUpdatedAt: recordUpdatedAt, metadata: metadata) {
                 if let data = try? encoder.encode(ride) {
                     records.append(SyncRecordEnvelope(
                         recordType: "ride",
                         recordId: ride.id,
-                        updatedAt: ride.updatedAt ?? ride.startDate,
+                        updatedAt: recordUpdatedAt,
                         payload: data
                     ))
                 }
@@ -113,10 +115,42 @@ final class LocalStore {
         return records
     }
 
-    func markSynced(recordType: String, recordId: UUID) {
-        var synced = loadSyncedKeys()
-        synced.insert("\(recordType):\(recordId.uuidString)")
-        saveSyncedKeys(synced)
+    func markSynced(recordType: String, recordId: UUID, serverUpdatedAt: Date? = nil) {
+        var metadata = loadSyncMetadata()
+        let key = syncKey(recordType: recordType, recordId: recordId)
+        let now = Date()
+        metadata[key] = SyncRecordMetadata(
+            recordType: recordType,
+            recordId: recordId,
+            status: .synced,
+            lastAttemptedAt: now,
+            lastSyncedAt: now,
+            serverUpdatedAt: serverUpdatedAt,
+            failedReason: nil,
+            retryCount: 0,
+            updatedAt: now
+        )
+        saveSyncMetadata(metadata)
+    }
+
+    func markSyncFailed(recordType: String, recordId: UUID, reason: String) {
+        var metadata = loadSyncMetadata()
+        let key = syncKey(recordType: recordType, recordId: recordId)
+        let now = Date()
+        var existing = metadata[key] ?? SyncRecordMetadata(
+            recordType: recordType,
+            recordId: recordId,
+            status: .failed,
+            retryCount: 0,
+            updatedAt: now
+        )
+        existing.status = .failed
+        existing.lastAttemptedAt = now
+        existing.failedReason = reason
+        existing.retryCount += 1
+        existing.updatedAt = now
+        metadata[key] = existing
+        saveSyncMetadata(metadata)
     }
 
     func applyServerRecord(_ envelope: SyncRecordEnvelope) {
@@ -131,12 +165,12 @@ final class LocalStore {
                 }
                 workouts.sort { $0.date < $1.date }
                 saveWorkouts(workouts)
-                markSynced(recordType: "workout", recordId: workout.id)
+                markSynced(recordType: "workout", recordId: workout.id, serverUpdatedAt: envelope.updatedAt)
             }
         case "ride":
             if let ride = try? decoder.decode(CompletedWorkout.self, from: envelope.payload) {
                 saveRide(ride)
-                markSynced(recordType: "ride", recordId: ride.id)
+                markSynced(recordType: "ride", recordId: ride.id, serverUpdatedAt: envelope.updatedAt)
             }
         default:
             break
@@ -148,17 +182,76 @@ final class LocalStore {
     }
 
     func isSynced(recordType: String, recordId: UUID) -> Bool {
-        loadSyncedKeys().contains("\(recordType):\(recordId.uuidString)")
+        let metadata = loadSyncMetadata()
+        let key = syncKey(recordType: recordType, recordId: recordId)
+        return metadata[key]?.status == .synced
     }
 
-    private func loadSyncedKeys() -> Set<String> {
-        guard let data = try? Data(contentsOf: syncStatusURL),
-              let keys = try? decoder.decode(Set<String>.self, from: data) else { return [] }
-        return keys
+    func syncMetadataSummary() -> SyncMetadataSummary {
+        let metadata = loadSyncMetadata()
+        let values = Array(metadata.values)
+        return SyncMetadataSummary(
+            pendingCount: pendingSyncRecords().count,
+            syncedCount: values.filter { $0.status == .synced }.count,
+            failedCount: values.filter { $0.status == .failed }.count,
+            lastAttempt: values.compactMap(\.lastAttemptedAt).max(),
+            lastSuccess: values.compactMap(\.lastSyncedAt).max(),
+            recentFailures: values.filter { $0.status == .failed }.compactMap(\.failedReason)
+        )
     }
 
-    private func saveSyncedKeys(_ keys: Set<String>) {
-        guard let data = try? encoder.encode(keys) else { return }
+    func syncMetadata(for recordType: String, recordId: UUID) -> SyncRecordMetadata? {
+        loadSyncMetadata()[syncKey(recordType: recordType, recordId: recordId)]
+    }
+
+    private func syncKey(recordType: String, recordId: UUID) -> String {
+        "\(recordType):\(recordId.uuidString)"
+    }
+
+    private func needsSync(key: String, recordUpdatedAt: Date, metadata: [String: SyncRecordMetadata]) -> Bool {
+        guard let meta = metadata[key] else { return true }
+        switch meta.status {
+        case .pendingUpload, .failed:
+            return true
+        case .synced:
+            guard let syncedAt = meta.lastSyncedAt else { return true }
+            return recordUpdatedAt > syncedAt
+        }
+    }
+
+    private func loadSyncMetadata() -> [String: SyncRecordMetadata] {
+        guard let data = try? Data(contentsOf: syncStatusURL) else { return [:] }
+
+        if let metadata = try? decoder.decode([String: SyncRecordMetadata].self, from: data) {
+            return metadata
+        }
+
+        // Migrate from old Set<String> format
+        if let keys = try? decoder.decode(Set<String>.self, from: data) {
+            let now = Date()
+            var metadata: [String: SyncRecordMetadata] = [:]
+            for key in keys {
+                let parts = key.split(separator: ":", maxSplits: 1)
+                guard parts.count == 2,
+                      let recordId = UUID(uuidString: String(parts[1])) else { continue }
+                metadata[key] = SyncRecordMetadata(
+                    recordType: String(parts[0]),
+                    recordId: recordId,
+                    status: .synced,
+                    lastSyncedAt: now,
+                    retryCount: 0,
+                    updatedAt: now
+                )
+            }
+            saveSyncMetadata(metadata)
+            return metadata
+        }
+
+        return [:]
+    }
+
+    private func saveSyncMetadata(_ metadata: [String: SyncRecordMetadata]) {
+        guard let data = try? encoder.encode(metadata) else { return }
         try? data.write(to: syncStatusURL, options: .atomic)
     }
 

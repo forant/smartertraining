@@ -31,8 +31,9 @@ final class BackendSyncService {
 
         status = .syncing
 
+        let pending = store.pendingSyncRecords()
+
         do {
-            let pending = store.pendingSyncRecords()
             let response = try await performSync(jwt: jwt, records: pending, since: lastSyncedAt)
 
             for envelope in response.records {
@@ -49,7 +50,11 @@ final class BackendSyncService {
             status = .synced(now)
 
         } catch {
-            status = .error(error.localizedDescription)
+            let reason = error.localizedDescription
+            for record in pending {
+                store.markSyncFailed(recordType: record.recordType, recordId: record.recordId, reason: reason)
+            }
+            status = .error(reason)
         }
     }
 

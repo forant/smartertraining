@@ -17,13 +17,13 @@ async def apple_auth(
     body: AppleAuthRequest,
     session: AsyncSession = Depends(get_session),
 ):
-    claims = await verify_apple_identity_token(
+    claims, error_reason = await verify_apple_identity_token(
         body.identity_token, settings.apple_bundle_id
     )
     if claims is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid identity token",
+            detail=error_reason or "Invalid identity token",
         )
 
     apple_user_id = claims["sub"]

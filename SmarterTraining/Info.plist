@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>SmarterTraining reads your heart rate during workouts to display live metrics and inform your training.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>SmarterTraining saves your completed workouts to the Health app to keep your fitness data in one place.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

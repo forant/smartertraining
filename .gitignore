@@ -1,6 +1,29 @@
+# Python
 venv/
 .venv/
 __pycache__/
 *.pyc
+
+# Environment variables
 .env
+.env.*
+
+# macOS
 .DS_Store
+
+# Xcode
+xcuserdata/
+DerivedData/
+.build/
+
+# Misc
+*.log
+
+
+# SQLite
+*.db-shm
+*.db-wal
+
+# Optional local backend artifacts
+*.sqlite
+*.sqlite3

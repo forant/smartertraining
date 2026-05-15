@@ -8,6 +8,19 @@ struct TodayView: View {
     @State private var showingRideSession = false
     @State private var showingEditor = false
     @State private var editor: WorkoutEditor?
+    @State private var signInResult: SignInResult?
+
+    private enum SignInResult: Identifiable {
+        case success
+        case failure(String)
+
+        var id: String {
+            switch self {
+            case .success: "success"
+            case .failure(let msg): "failure:\(msg)"
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -212,20 +225,57 @@ struct TodayView: View {
                     switch result {
                     case .success(let authorization):
                         Task {
-                            try? await appState.auth.handleSignIn(authorization: authorization)
-                            appState.sync.updateAuthStatus()
-                            appState.triggerSync()
+                            do {
+                                try await appState.auth.handleSignIn(authorization: authorization)
+                                appState.sync.updateAuthStatus()
+                                appState.triggerSync()
+                                signInResult = .success
+                            } catch {
+                                signInResult = .failure(error.localizedDescription)
+                            }
                         }
-                    case .failure:
-                        break
+                    case .failure(let error):
+                        signInResult = .failure(error.localizedDescription)
                     }
                 }
                 .signInWithAppleButtonStyle(.black)
                 .frame(height: 50)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                if let signInResult {
+                    signInResultBanner(signInResult)
+                }
             }
         }
         .padding(.top, 4)
+    }
+
+    @ViewBuilder
+    private func signInResultBanner(_ result: SignInResult) -> some View {
+        switch result {
+        case .success:
+            Label("Signed in successfully", systemImage: "checkmark.circle.fill")
+                .font(.subheadline)
+                .foregroundStyle(.green)
+                .padding()
+                .frame(maxWidth: .infinity)
+                .background(Color.green.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        case .failure(let message):
+            VStack(spacing: 6) {
+                Label("Sign in failed", systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.red)
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.red.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
     }
 
     private var syncIcon: String {
@@ -281,14 +331,37 @@ struct TodayView: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
 
-            HStack(spacing: 8) {
-                Text("Pending: \(appState.store.pendingSyncRecords().count)")
+            let summary = appState.store.syncMetadataSummary()
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text("Pending: \(summary.pendingCount)")
+                    Text("Synced: \(summary.syncedCount)")
+                    Text("Failed: \(summary.failedCount)")
+                        .foregroundStyle(summary.failedCount > 0 ? .red : .secondary)
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+                if let lastAttempt = summary.lastAttempt {
+                    Text("Last attempt: \(lastAttempt.formatted(.dateTime.hour().minute().second()))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                if let lastSuccess = summary.lastSuccess {
+                    Text("Last success: \(lastSuccess.formatted(.dateTime.hour().minute().second()))")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                if !summary.recentFailures.isEmpty {
+                    Text("Failures: \(summary.recentFailures.joined(separator: ", "))")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .lineLimit(2)
+                }
+
+                Text("Service: \(appState.sync.status.displayText)")
                     .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text("Status: \(appState.sync.status.displayText)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
             }
 
             HStack(spacing: 12) {

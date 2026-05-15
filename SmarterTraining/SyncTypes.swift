@@ -1,5 +1,7 @@
 import Foundation
 
+// MARK: - Service-Level Sync Status
+
 enum SyncStatus: Equatable {
     case notSignedIn
     case idle
@@ -18,9 +20,40 @@ enum SyncStatus: Equatable {
     }
 }
 
+// MARK: - Sync Envelope
+
 struct SyncRecordEnvelope: Codable {
     var recordType: String
     var recordId: UUID
     var updatedAt: Date
     var payload: Data
+}
+
+// MARK: - Per-Record Sync Metadata
+
+enum RecordSyncStatus: String, Codable {
+    case pendingUpload
+    case synced
+    case failed
+}
+
+struct SyncRecordMetadata: Codable {
+    var recordType: String
+    var recordId: UUID
+    var status: RecordSyncStatus
+    var lastAttemptedAt: Date?
+    var lastSyncedAt: Date?
+    var serverUpdatedAt: Date?
+    var failedReason: String?
+    var retryCount: Int
+    var updatedAt: Date
+}
+
+struct SyncMetadataSummary {
+    var pendingCount: Int
+    var syncedCount: Int
+    var failedCount: Int
+    var lastAttempt: Date?
+    var lastSuccess: Date?
+    var recentFailures: [String]
 }

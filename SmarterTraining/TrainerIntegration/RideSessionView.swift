@@ -17,6 +17,8 @@ struct RideSessionView: View {
     @State private var ergToggle = false
     @State private var editor: WorkoutEditor?
     @State private var showingEditor = false
+    @State private var healthKit = HealthKitManager()
+    @State private var savingToHealthKit = false
 
     private static let saveIntervalSeconds = 10
 
@@ -156,6 +158,9 @@ struct RideSessionView: View {
                 WorkoutEditorView(editor: editor)
             }
         }
+        .task {
+            await healthKit.requestAuthorization()
+        }
     }
 
     private func startRide() {
@@ -176,6 +181,7 @@ struct RideSessionView: View {
 
         phase = .riding
         runtime?.start()
+        healthKit.startHeartRateObservation()
     }
 
     private var ergToggleSection: some View {
@@ -242,10 +248,19 @@ struct RideSessionView: View {
     }
 
     private func finishRide(_ runtime: TrainerWorkoutRuntime) {
+        healthKit.stopHeartRateObservation()
+
+        let trainerHRs = runtime.samples.compactMap(\.heartRate).filter { $0 > 0 }
+        let hrValues = trainerHRs.isEmpty ? healthKit.collectedBPMs : trainerHRs
+        let avgHR = hrValues.isEmpty ? nil : hrValues.reduce(0, +) / hrValues.count
+        let maxHR = hrValues.max()
+
         if var ride = completedWorkout {
             ride.duration = runtime.totalElapsed
             ride.samples = runtime.samples
             ride.status = .finished
+            ride.averageHeartRate = avgHR
+            ride.maxHeartRate = maxHR
             completedWorkout = ride
             appState.store.saveRide(ride)
         } else {
@@ -254,12 +269,34 @@ struct RideSessionView: View {
                 duration: runtime.totalElapsed,
                 title: recommendation.title,
                 samples: runtime.samples,
-                status: .finished
+                status: .finished,
+                averageHeartRate: avgHR,
+                maxHeartRate: maxHR
             )
             appState.store.saveRide(completedWorkout!)
         }
         phase = .finished
         appState.triggerSync()
+
+        if healthKit.isAvailable {
+            savingToHealthKit = true
+            Task {
+                let endDate = Date()
+                let startDate = completedWorkout?.startDate ?? runtime.startDate ?? endDate
+                let (uuid, failure) = await healthKit.saveWorkout(
+                    startDate: startDate,
+                    endDate: endDate,
+                    trainerSamples: runtime.samples
+                )
+                savingToHealthKit = false
+                completedWorkout?.healthKitWorkoutUUID = uuid
+                completedWorkout?.healthKitSaveStatus = uuid != nil ? .saved : .failed
+                completedWorkout?.healthKitFailureReason = failure
+                if let ride = completedWorkout {
+                    appState.store.saveRide(ride)
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -314,8 +351,9 @@ struct RideSessionView: View {
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 32) {
+            HStack(spacing: 20) {
                 metricBox("POWER", value: manager.metrics.power.map { "\($0)" } ?? "--", unit: "W")
+                metricBox("HR", value: effectiveHeartRate.map { "\($0)" } ?? "--", unit: "bpm")
                 metricBox("CADENCE", value: manager.metrics.cadence.map { "\(Int($0))" } ?? "--", unit: "rpm")
                 metricBox("SPEED", value: manager.metrics.speed.map { String(format: "%.1f", $0) } ?? "--", unit: "km/h")
             }
@@ -435,9 +473,22 @@ struct RideSessionView: View {
                     .fontWeight(.bold)
 
                 if let runtime {
-                    Text(formatDuration(runtime.totalElapsed) + " total")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    VStack(spacing: 4) {
+                        Text(formatDuration(runtime.totalElapsed) + " total")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+
+                        if let avg = completedWorkout?.averageHeartRate,
+                           let max = completedWorkout?.maxHeartRate {
+                            Text("Avg HR \(avg) bpm \u{00B7} Max \(max) bpm")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if healthKit.isAvailable {
+                    healthKitStatusView
                 }
 
                 if let workout = completedWorkout {
@@ -463,6 +514,40 @@ struct RideSessionView: View {
                 .controlSize(.large)
             }
             .padding(24)
+        }
+    }
+
+    // MARK: - Heart Rate
+
+    private var effectiveHeartRate: Int? {
+        manager.metrics.heartRate ?? healthKit.currentHeartRate
+    }
+
+    @ViewBuilder
+    private var healthKitStatusView: some View {
+        if savingToHealthKit {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Saving to Health...")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } else if completedWorkout?.healthKitSaveStatus == .saved {
+            Label("Saved to Health", systemImage: "heart.fill")
+                .font(.subheadline)
+                .foregroundStyle(.green)
+        } else if completedWorkout?.healthKitSaveStatus == .failed {
+            VStack(spacing: 4) {
+                Label("Could not save to Health", systemImage: "exclamationmark.triangle")
+                    .font(.subheadline)
+                    .foregroundStyle(.orange)
+                if let reason = completedWorkout?.healthKitFailureReason {
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
 

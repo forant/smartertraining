@@ -15,6 +15,9 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
     private var centralManager: CBCentralManager!
     private var connectedPeripheral: CBPeripheral?
     private var controlPointCharacteristic: CBCharacteristic?
+    private var pendingReconnectIdentifier: UUID?
+    private var reconnectTimer: Timer?
+    private static let reconnectTimeout: TimeInterval = 10
 
     override init() {
         super.init()
@@ -48,10 +51,54 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
     }
 
     func disconnect() {
+        cancelReconnectTimer()
         if let peripheral = connectedPeripheral {
             centralManager.cancelPeripheralConnection(peripheral)
         }
         cleanUpConnection()
+    }
+
+    func attemptReconnect(identifier: UUID) {
+        guard centralManager.state == .poweredOn else {
+            pendingReconnectIdentifier = identifier
+            return
+        }
+        let peripherals = centralManager.retrievePeripherals(withIdentifiers: [identifier])
+        guard let peripheral = peripherals.first else {
+            connectionState = .disconnected
+            return
+        }
+
+        let name = peripheral.name ?? "Trainer"
+        connectionState = .connecting(deviceName: name)
+        connectedPeripheral = peripheral
+        peripheral.delegate = self
+        centralManager.connect(peripheral, options: nil)
+        startReconnectTimer()
+    }
+
+    private func startReconnectTimer() {
+        cancelReconnectTimer()
+        reconnectTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.reconnectTimeout,
+            repeats: false
+        ) { [weak self] _ in
+            guard let self else { return }
+            if case .connecting = self.connectionState {
+                #if DEBUG
+                print("[FTMS] Reconnect timed out")
+                #endif
+                if let peripheral = self.connectedPeripheral {
+                    self.centralManager.cancelPeripheralConnection(peripheral)
+                }
+                self.cleanUpConnection()
+            }
+        }
+    }
+
+    private func cancelReconnectTimer() {
+        reconnectTimer?.invalidate()
+        reconnectTimer = nil
     }
 
     func send(_ command: TrainerCommand) {
@@ -81,8 +128,13 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
             if case .bluetoothOff = connectionState {
                 connectionState = .disconnected
             }
+            if let identifier = pendingReconnectIdentifier {
+                pendingReconnectIdentifier = nil
+                attemptReconnect(identifier: identifier)
+            }
         case .poweredOff:
             connectionState = .bluetoothOff
+            cancelReconnectTimer()
             cleanUpConnection()
         case .unauthorized:
             connectionState = .bluetoothUnauthorized
@@ -109,6 +161,7 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        cancelReconnectTimer()
         #if DEBUG
         print("[FTMS] Connected to \(peripheral.name ?? "unknown")")
         #endif
@@ -117,6 +170,7 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: (any Error)?) {
+        cancelReconnectTimer()
         #if DEBUG
         print("[FTMS] Connection failed: \(error?.localizedDescription ?? "unknown")")
         #endif
@@ -210,6 +264,12 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
 
         let deviceName = peripheral.name ?? "Trainer"
         connectionState = .connected(deviceName: deviceName)
+
+        RememberedDeviceStore.shared.trainer = RememberedDevice(
+            peripheralIdentifier: peripheral.identifier,
+            displayName: deviceName,
+            lastConnectedAt: Date()
+        )
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: (any Error)?) {

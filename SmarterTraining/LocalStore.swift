@@ -72,6 +72,33 @@ final class LocalStore {
             .sorted { $0.startDate > $1.startDate }
     }
 
+    // MARK: - Training Intent
+
+    private var intentURL: URL {
+        baseURL.appendingPathComponent("training_intent.json")
+    }
+
+    func saveIntent(_ intent: ShortTermTrainingIntent) {
+        guard let data = try? encoder.encode(intent) else { return }
+        try? data.write(to: intentURL, options: .atomic)
+    }
+
+    func loadIntent() -> ShortTermTrainingIntent? {
+        guard let data = try? Data(contentsOf: intentURL) else { return nil }
+        return try? decoder.decode(ShortTermTrainingIntent.self, from: data)
+    }
+
+    func clearIntent() {
+        try? FileManager.default.removeItem(at: intentURL)
+    }
+
+    func activeIntent(on date: Date = Date()) -> ShortTermTrainingIntent? {
+        guard let intent = loadIntent() else { return nil }
+        if intent.isExpired { return nil }
+        if intent.activeDay(on: date) != nil { return intent }
+        return nil
+    }
+
     // MARK: - Sync Support
 
     private var syncStatusURL: URL {

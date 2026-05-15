@@ -14,6 +14,7 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 accountSection
+                devicesSection
                 integrationsSection
                 trainingDataSection
                 aboutSection
@@ -130,6 +131,64 @@ struct SettingsView: View {
                 Label(signInError, systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.red)
+            }
+        }
+    }
+
+    // MARK: - Devices
+
+    private var devicesSection: some View {
+        Section {
+            rememberedDeviceRow(
+                label: "Trainer",
+                icon: "bicycle",
+                device: RememberedDeviceStore.shared.trainer,
+                onForget: { RememberedDeviceStore.shared.forgetTrainer() }
+            )
+            rememberedDeviceRow(
+                label: "Heart rate monitor",
+                icon: "heart.fill",
+                device: RememberedDeviceStore.shared.hrm,
+                onForget: { RememberedDeviceStore.shared.forgetHRM() }
+            )
+        } header: {
+            Text("Remembered devices")
+        } footer: {
+            Text("Remembered devices reconnect automatically at ride start.")
+        }
+    }
+
+    private func rememberedDeviceRow(
+        label: String,
+        icon: String,
+        device: RememberedDevice?,
+        onForget: @escaping () -> Void
+    ) -> some View {
+        HStack {
+            Image(systemName: icon)
+                .font(.subheadline)
+                .foregroundStyle(device != nil ? Color.accentColor : Color(.tertiaryLabel))
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                if let device {
+                    Text(device.displayName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("None saved")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            Spacer()
+            if device != nil {
+                Button("Forget", role: .destructive) {
+                    onForget()
+                }
+                .font(.subheadline)
             }
         }
     }

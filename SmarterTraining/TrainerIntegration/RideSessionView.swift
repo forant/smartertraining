@@ -11,6 +11,7 @@ struct RideSessionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(AppState.self) private var appState
     @State private var manager = FTMSManager()
+    @State private var hrmManager = HRMManager()
     @State private var runtime: TrainerWorkoutRuntime?
     @State private var phase: SessionPhase = .connecting
     @State private var completedWorkout: CompletedWorkout?
@@ -19,6 +20,14 @@ struct RideSessionView: View {
     @State private var showingEditor = false
     @State private var healthKit = HealthKitManager()
     @State private var savingToHealthKit = false
+    @State private var showingHRMPicker = false
+
+    // Post-workout state
+    @State private var finishedPhase: FinishedPhase = .feedback
+    @State private var postFeedback: WorkoutFeedback?
+    @State private var postEffort: Int?
+    @State private var postNote: String = ""
+    @State private var reflectionService = PostWorkoutReflectionService()
 
     private static let saveIntervalSeconds = 10
 
@@ -27,6 +36,11 @@ struct RideSessionView: View {
         case ready
         case riding
         case finished
+    }
+
+    private enum FinishedPhase {
+        case feedback
+        case summary
     }
 
     var body: some View {
@@ -67,6 +81,7 @@ struct RideSessionView: View {
                     Button(phase == .finished ? "Done" : "Close") {
                         runtime?.finish()
                         manager.disconnect()
+                        hrmManager.disconnect()
                         dismiss()
                     }
                 }
@@ -115,6 +130,7 @@ struct RideSessionView: View {
             }
 
             ergToggleSection
+            hrmSection
 
             Spacer()
 
@@ -158,8 +174,75 @@ struct RideSessionView: View {
                 WorkoutEditorView(editor: editor)
             }
         }
+        .sheet(isPresented: $showingHRMPicker) {
+            HRMPickerView(manager: hrmManager)
+        }
         .task {
             await healthKit.requestAuthorization()
+        }
+        .onAppear {
+            attemptHRMReconnect()
+        }
+    }
+
+    private func attemptHRMReconnect() {
+        guard !hrmManager.connectionState.isConnected else { return }
+        if let remembered = RememberedDeviceStore.shared.hrm {
+            hrmManager.attemptReconnect(identifier: remembered.peripheralIdentifier)
+        }
+    }
+
+    private var hrmSection: some View {
+        VStack(spacing: 6) {
+            HStack {
+                Image(systemName: "heart.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(hrmStatusColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(hrmStatusText)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Text(hrmDetailText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(hrmManager.connectionState.isConnected ? "Change" : "Add") {
+                    showingHRMPicker = true
+                }
+                .font(.subheadline)
+            }
+        }
+        .padding()
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 24)
+    }
+
+    private var hrmStatusText: String {
+        switch hrmManager.connectionState {
+        case .connected(let name): name
+        case .connecting: "Connecting..."
+        case .scanning: "Scanning..."
+        default: "Heart rate monitor"
+        }
+    }
+
+    private var hrmDetailText: String {
+        switch hrmManager.connectionState {
+        case .connected: "Connected"
+        case .connecting(let name): "Connecting to \(name)"
+        case .disconnected: "Optional \u{2014} tap Add to pair"
+        case .error(let msg): msg
+        default: "Not connected"
+        }
+    }
+
+    private var hrmStatusColor: Color {
+        switch hrmManager.connectionState {
+        case .connected: .red
+        case .connecting, .scanning: .orange
+        default: .secondary
         }
     }
 
@@ -167,7 +250,8 @@ struct RideSessionView: View {
         guard let editor else { return }
         runtime = TrainerWorkoutRuntime(
             steps: editor.toSteps(),
-            trainerManager: manager
+            trainerManager: manager,
+            hrmManager: hrmManager
         )
         runtime?.ergEnabled = ergToggle
 
@@ -266,10 +350,11 @@ struct RideSessionView: View {
             ride.status = .finished
             ride.averageHeartRate = avgHR
             ride.maxHeartRate = maxHR
+            ride.computeStats(from: runtime.samples, ergEnabled: ergToggle, workoutType: recommendation.type)
             completedWorkout = ride
             appState.store.saveRide(ride)
         } else {
-            completedWorkout = CompletedWorkout(
+            var ride = CompletedWorkout(
                 startDate: runtime.startDate ?? Date(),
                 duration: runtime.totalElapsed,
                 title: recommendation.title,
@@ -278,8 +363,11 @@ struct RideSessionView: View {
                 averageHeartRate: avgHR,
                 maxHeartRate: maxHR
             )
-            appState.store.saveRide(completedWorkout!)
+            ride.computeStats(from: runtime.samples, ergEnabled: ergToggle, workoutType: recommendation.type)
+            completedWorkout = ride
+            appState.store.saveRide(ride)
         }
+        finishedPhase = .feedback
         phase = .finished
         appState.triggerSync()
 
@@ -300,6 +388,70 @@ struct RideSessionView: View {
                 if let ride = completedWorkout {
                     appState.store.saveRide(ride)
                 }
+            }
+        }
+    }
+
+    private func submitFeedbackAndRequestReflection() {
+        CoachingNotificationManager.shared.requestPermissionIfNeeded()
+
+        completedWorkout?.workoutFeedback = postFeedback
+        completedWorkout?.perceivedEffort = postEffort
+        completedWorkout?.postWorkoutNote = postNote.isEmpty ? nil : postNote
+        completedWorkout?.reflectionStatus = .loading
+        completedWorkout?.updatedAt = Date()
+
+        if let ride = completedWorkout {
+            appState.store.saveRide(ride)
+        }
+
+        if let feedback = postFeedback {
+            appState.submitFeedback(feedback)
+        }
+
+        finishedPhase = .summary
+
+        let feedbackIntent = TrainingIntentBuilder.buildFromFeedback(
+            sourceWorkoutId: completedWorkout?.id ?? UUID(),
+            workoutCompletedAt: Date(),
+            workoutType: recommendation.type,
+            feedback: postFeedback,
+            perceivedEffort: postEffort
+        )
+        appState.store.saveIntent(feedbackIntent)
+        CoachingNotificationManager.shared.scheduleNotifications(for: feedbackIntent)
+
+        Task {
+            guard var ride = completedWorkout else { return }
+            let memorySummary = TrainingMemoryBuilder.build(
+                history: appState.recentHistory,
+                rides: appState.store.finishedRides()
+            )
+            await reflectionService.fetchReflection(
+                workout: ride,
+                recommendation: recommendation,
+                steps: editor?.toSteps() ?? [],
+                checkIn: checkIn,
+                memorySummary: memorySummary,
+                auth: appState.auth
+            )
+
+            if let reflection = reflectionService.reflection {
+                ride = completedWorkout ?? ride
+                ride.reflection = reflection
+                ride.reflectionStatus = reflection.isFallback ? .failed : .generated
+                ride.updatedAt = Date()
+                completedWorkout = ride
+                appState.store.saveRide(ride)
+
+                let intent = TrainingIntentBuilder.build(
+                    from: reflection,
+                    sourceWorkoutId: ride.id,
+                    workoutCompletedAt: ride.startDate,
+                    workoutType: recommendation.type
+                )
+                appState.store.saveIntent(intent)
+                CoachingNotificationManager.shared.scheduleNotifications(for: intent)
             }
         }
     }
@@ -360,12 +512,38 @@ struct RideSessionView: View {
 
             HStack(spacing: 20) {
                 metricBox("POWER", value: runtime.smoothedPower.map { "\($0)" } ?? "--", unit: "W")
-                metricBox("HR", value: effectiveHeartRate.map { "\($0)" } ?? "--", unit: "bpm")
+                hrMetricBox
                 metricBox("CADENCE", value: manager.metrics.cadence.map { "\(Int($0))" } ?? "--", unit: "rpm")
                 metricBox("SPEED", value: manager.metrics.speed.map { String(format: "%.1f", $0) } ?? "--", unit: "km/h")
             }
         }
         .padding(.vertical, 20)
+    }
+
+    private var hrMetricBox: some View {
+        let resolved = resolvedHeartRate
+        return VStack(spacing: 4) {
+            HStack(spacing: 2) {
+                Text("HR")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                #if DEBUG
+                if resolved.source != .none {
+                    Text("(\(resolved.source.rawValue))")
+                        .font(.system(size: 7))
+                        .foregroundStyle(.quaternary)
+                }
+                #endif
+            }
+            Text(resolved.bpm.map { "\($0)" } ?? "--")
+                .font(.title2)
+                .fontWeight(.semibold)
+                .monospacedDigit()
+            Text("bpm")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func metricBox(_ label: String, value: String, unit: String) -> some View {
@@ -467,12 +645,23 @@ struct RideSessionView: View {
     // MARK: - Finished
 
     private var finishedView: some View {
+        Group {
+            switch finishedPhase {
+            case .feedback:
+                feedbackPhaseView
+            case .summary:
+                summaryPhaseView
+            }
+        }
+    }
+
+    private var feedbackPhaseView: some View {
         ScrollView {
             VStack(spacing: 24) {
-                Spacer(minLength: 40)
+                Spacer(minLength: 20)
 
                 Image(systemName: "flag.checkered")
-                    .font(.system(size: 56))
+                    .font(.system(size: 48))
                     .foregroundStyle(.green)
 
                 Text("Workout Complete")
@@ -480,18 +669,46 @@ struct RideSessionView: View {
                     .fontWeight(.bold)
 
                 if let runtime {
-                    VStack(spacing: 4) {
-                        Text(formatDuration(runtime.totalElapsed) + " total")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                    Text(formatDuration(runtime.totalElapsed) + " total")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
 
-                        if let avg = completedWorkout?.averageHeartRate,
-                           let max = completedWorkout?.maxHeartRate {
-                            Text("Avg HR \(avg) bpm \u{00B7} Max \(max) bpm")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                PostWorkoutFeedbackView(
+                    feedback: $postFeedback,
+                    perceivedEffort: $postEffort,
+                    note: $postNote,
+                    onDone: submitFeedbackAndRequestReflection
+                )
+            }
+            .padding(.horizontal, 24)
+        }
+    }
+
+    private var summaryPhaseView: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                Spacer(minLength: 20)
+
+                Image(systemName: "flag.checkered")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.green)
+
+                Text("Workout Complete")
+                    .font(.title2)
+                    .fontWeight(.bold)
+
+                if let workout = completedWorkout {
+                    PostWorkoutSummaryCard(workout: workout)
+                }
+
+                if let reflection = reflectionService.reflection {
+                    PostWorkoutReflectionCard(
+                        reflection: reflection,
+                        isLoading: false
+                    )
+                } else if reflectionService.isLoading {
+                    ReflectionLoadingView()
                 }
 
                 if healthKit.isAvailable {
@@ -510,6 +727,7 @@ struct RideSessionView: View {
 
                 Button {
                     manager.disconnect()
+                    hrmManager.disconnect()
                     dismiss()
                 } label: {
                     Text("Done")
@@ -526,8 +744,16 @@ struct RideSessionView: View {
 
     // MARK: - Heart Rate
 
+    private var resolvedHeartRate: ResolvedHeartRate {
+        HeartRateResolver.resolve(
+            trainerHR: manager.metrics.heartRate,
+            hrmHR: hrmManager.heartRate,
+            healthKitHR: healthKit.currentHeartRate
+        )
+    }
+
     private var effectiveHeartRate: Int? {
-        manager.metrics.heartRate ?? healthKit.currentHeartRate
+        resolvedHeartRate.bpm
     }
 
     @ViewBuilder

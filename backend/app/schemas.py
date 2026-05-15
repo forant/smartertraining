@@ -71,3 +71,34 @@ class CoachExplanationResponse(BaseModel):
     tomorrow_implication: Optional[str] = None
     confidence: str = "high"
     is_fallback: bool = False
+
+
+# --- Post-Workout Reflection ---
+
+
+class DayGuidance(BaseModel):
+    day_label: str
+    guidance: str
+    recommended_intensity: str
+
+
+class PostWorkoutReflectionRequest(BaseModel):
+    workout_summary: Dict
+    recommendation: Dict
+    executed_steps: Optional[List[Dict]] = None
+    feedback: Optional[str] = None
+    perceived_effort: Optional[int] = None
+    user_note: Optional[str] = None
+    check_in: Optional[Dict] = None
+    life_context: Optional[List[str]] = None
+    training_memory: Optional[Dict] = None
+
+
+class PostWorkoutReflectionResponse(BaseModel):
+    session_evaluation: str
+    what_went_well: Optional[str] = None
+    watch_out: Optional[str] = None
+    next_two_days: List[DayGuidance]
+    confidence: str = "high"
+    is_fallback: bool = False
+    generated_at: str

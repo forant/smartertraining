@@ -1,47 +1,44 @@
 import SwiftUI
 
-struct TrainerConnectionView: View {
-    var manager: FTMSManager
-    var onConnected: () -> Void
-
-    @State private var attemptedReconnect = false
+struct HRMPickerView: View {
+    var manager: HRMManager
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 24) {
-            statusHeader
+        NavigationStack {
+            VStack(spacing: 24) {
+                statusHeader
 
-            if case .error(let msg) = manager.connectionState {
-                errorBanner(msg)
-            }
+                if case .error(let msg) = manager.connectionState {
+                    errorBanner(msg)
+                }
 
-            if manager.connectionState == .bluetoothOff || manager.connectionState == .bluetoothUnauthorized {
-                bluetoothUnavailableView
-            } else {
                 deviceList
-                scanButton
+                controls
             }
-        }
-        .padding()
-        .onAppear {
-            if !attemptedReconnect {
-                attemptedReconnect = true
-                attemptRememberedReconnect()
+            .padding()
+            .navigationTitle("Heart Rate Monitor")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
             }
-        }
-        .onChange(of: manager.connectionState) { _, newValue in
-            if newValue.isConnected {
-                onConnected()
+            .onAppear {
+                if !manager.connectionState.isConnected && !manager.connectionState.isScanning {
+                    manager.startScanning()
+                }
+            }
+            .onDisappear {
+                manager.stopScanning()
+            }
+            .onChange(of: manager.connectionState) { _, newValue in
+                if newValue.isConnected {
+                    dismiss()
+                }
             }
         }
     }
-
-    private func attemptRememberedReconnect() {
-        if let remembered = RememberedDeviceStore.shared.trainer {
-            manager.attemptReconnect(identifier: remembered.peripheralIdentifier)
-        }
-    }
-
-    // MARK: - Status Header
 
     private var statusHeader: some View {
         VStack(spacing: 8) {
@@ -67,28 +64,25 @@ struct TrainerConnectionView: View {
     private var statusIcon: String {
         switch manager.connectionState {
         case .connected: "checkmark.circle.fill"
-        case .scanning, .connecting, .discoveringServices: "antenna.radiowaves.left.and.right"
-        case .bluetoothOff, .bluetoothUnauthorized: "exclamationmark.triangle.fill"
+        case .scanning, .connecting: "heart.fill"
         case .error: "xmark.circle.fill"
-        case .disconnected: "antenna.radiowaves.left.and.right"
+        default: "heart"
         }
     }
 
     private var statusColor: Color {
         switch manager.connectionState {
         case .connected: .green
-        case .scanning, .connecting, .discoveringServices: .accentColor
-        case .bluetoothOff, .bluetoothUnauthorized, .error: .orange
-        case .disconnected: .secondary
+        case .scanning, .connecting: .red.opacity(0.7)
+        case .error: .orange
+        default: .secondary
         }
     }
-
-    // MARK: - Device List
 
     private var deviceList: some View {
         Group {
             if manager.discoveredDevices.isEmpty && manager.connectionState.isScanning {
-                Text("Looking for trainers nearby...")
+                Text("Looking for heart rate monitors...")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .padding(.vertical, 32)
@@ -98,8 +92,8 @@ struct TrainerConnectionView: View {
                         manager.connect(to: device)
                     } label: {
                         HStack {
-                            Image(systemName: "bicycle")
-                                .foregroundStyle(.tint)
+                            Image(systemName: "heart.fill")
+                                .foregroundStyle(.red.opacity(0.7))
                             Text(device.name)
                                 .font(.body)
                             Spacer()
@@ -122,34 +116,44 @@ struct TrainerConnectionView: View {
         }
     }
 
-    // MARK: - Controls
-
-    private var scanButton: some View {
-        Button {
-            if manager.connectionState.isScanning {
-                manager.stopScanning()
-            } else {
-                manager.startScanning()
+    @ViewBuilder
+    private var controls: some View {
+        if manager.connectionState.isConnected {
+            Button(role: .destructive) {
+                manager.disconnect()
+            } label: {
+                Text("Disconnect")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
             }
-        } label: {
-            Text(manager.connectionState.isScanning ? "Stop Scanning" : "Scan for Trainers")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+        } else {
+            Button {
+                if manager.connectionState.isScanning {
+                    manager.stopScanning()
+                } else {
+                    manager.startScanning()
+                }
+            } label: {
+                Text(manager.connectionState.isScanning ? "Stop Scanning" : "Scan")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .disabled(manager.connectionState == .bluetoothOff || manager.connectionState == .bluetoothUnauthorized)
-    }
 
-    private var bluetoothUnavailableView: some View {
-        VStack(spacing: 12) {
-            Text("Please enable Bluetooth in Settings to connect to your trainer.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        if RememberedDeviceStore.shared.hrm != nil && !manager.connectionState.isConnected {
+            Button {
+                RememberedDeviceStore.shared.forgetHRM()
+            } label: {
+                Text("Forget saved monitor")
+                    .font(.subheadline)
+            }
         }
-        .padding()
     }
 
     private func errorBanner(_ message: String) -> some View {

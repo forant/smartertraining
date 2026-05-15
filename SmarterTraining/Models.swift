@@ -401,7 +401,8 @@ final class AppState {
             profile: userProfile,
             checkIn: checkIn,
             recentHistory: recentHistory,
-            memorySummary: buildMemorySummary()
+            memorySummary: buildMemorySummary(),
+            activeIntent: store.activeIntent()
         )
         return engine.recommend(for: inputs)
     }

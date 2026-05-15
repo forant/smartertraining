@@ -9,6 +9,7 @@ struct RecommendationEngine {
         var checkIn: CheckIn
         var recentHistory: [WorkoutHistoryEntry]
         var memorySummary: TrainingMemorySummary = .empty
+        var activeIntent: ShortTermTrainingIntent? = nil
     }
 
     func recommend(for inputs: Inputs) -> WorkoutRecommendation {
@@ -105,6 +106,12 @@ struct RecommendationEngine {
             return .recovery
         }
 
+        // Step A1.5: Coaching intent from prior workout
+        if let intent = inputs.activeIntent, !intent.isExpired, let intentIntensity = intent.recommendedIntensity() {
+            let intentResult = applyIntent(intentIntensity, intent: intent, checkIn: checkIn, actStress: actStress)
+            if let result = intentResult { return result }
+        }
+
         // Step A2: Activity-based overrides
         if actStress >= 2 && checkIn.overallFeel != "Great" {
             return checkIn.legs == "Heavy" ? .recovery : .endurance
@@ -192,9 +199,52 @@ struct RecommendationEngine {
         return .endurance
     }
 
+    // MARK: - Intent Application
+
+    private func applyIntent(
+        _ intensity: ShortTermTrainingIntent.RecommendedIntensity,
+        intent: ShortTermTrainingIntent,
+        checkIn: CheckIn,
+        actStress: Int
+    ) -> WorkoutType? {
+        switch intensity {
+        case .rest, .recovery:
+            return .recovery
+        case .endurance:
+            if checkIn.legs == "Dead" || checkIn.overallFeel == "Bad" {
+                return .recovery
+            }
+            return .endurance
+        case .quality:
+            if checkIn.legs == "Heavy" || checkIn.legs == "Dead"
+                || checkIn.overallFeel == "Bad" || checkIn.overallFeel == "Okay"
+                || checkIn.contextFlags.contains("Getting sick")
+                || checkIn.contextFlags.contains("Poor sleep")
+                || actStress >= 2 {
+                return .endurance
+            }
+            return nil
+        case .flexible:
+            return nil
+        }
+    }
+
     // MARK: - Reason Builder
 
     func buildReason(type: WorkoutType, inputs: Inputs) -> String {
+        if let intent = inputs.activeIntent, !intent.isExpired, let rationale = intent.rationale() {
+            let intentIntensity = intent.recommendedIntensity()
+            if intentIntensity == .rest || intentIntensity == .recovery {
+                return rationale
+            }
+            if intentIntensity == .endurance && type == .endurance {
+                return rationale
+            }
+            if intentIntensity == .quality && type == .quality {
+                return rationale
+            }
+        }
+
         let checkIn = inputs.checkIn
         let lastType = inputs.recentHistory.last?.type
         let lastFeedback = inputs.recentHistory.last?.feedback

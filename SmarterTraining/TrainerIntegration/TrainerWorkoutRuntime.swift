@@ -61,11 +61,13 @@ final class TrainerWorkoutRuntime {
 
     private var timer: Timer?
     private weak var trainerManager: FTMSManager?
+    private weak var hrmManager: HRMManager?
     private var lastTargetSent: Int?
 
-    init(steps: [TrainerWorkoutStep], trainerManager: FTMSManager?) {
+    init(steps: [TrainerWorkoutStep], trainerManager: FTMSManager?, hrmManager: HRMManager? = nil) {
         self.steps = steps
         self.trainerManager = trainerManager
+        self.hrmManager = hrmManager
     }
 
     // MARK: - Computed
@@ -309,8 +311,12 @@ final class TrainerWorkoutRuntime {
 
     private func captureSample() {
         guard let manager = trainerManager else { return }
-        let m = manager.metrics
+        var m = manager.metrics
         guard m.timestamp != .distantPast else { return }
+
+        if (m.heartRate == nil || m.heartRate == 0), let hrmHR = hrmManager?.heartRate, hrmHR > 0 {
+            m.heartRate = hrmHR
+        }
         samples.append(m)
 
         if let watts = m.power {

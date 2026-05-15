@@ -13,10 +13,12 @@ struct CheckInView: View {
     @State private var legs = ""
     @State private var motivation = ""
     @State private var timeAvailable = 0
+    @State private var selectedActivities: Set<String> = []
+    @State private var activityTiming = ""
+    @State private var activityIntensity = ""
     @State private var selectedContextFlags: Set<String> = []
-    @State private var notes = ""
 
-    private let totalSteps = 5
+    private let totalSteps = 6
 
     var body: some View {
         NavigationStack {
@@ -31,7 +33,8 @@ struct CheckInView: View {
                     legsCard.tag(1)
                     motivationCard.tag(2)
                     timeCard.tag(3)
-                    contextCard.tag(4)
+                    activityCard.tag(4)
+                    lifeContextCard.tag(5)
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .animation(.easeInOut(duration: 0.3), value: step)
@@ -149,21 +152,122 @@ struct CheckInView: View {
         }
     }
 
-    private var contextCard: some View {
-        CheckInCard(question: "Anything else worth noting?") {
+    // MARK: - Activity Card
+
+    private let activityOptions: [(String, String)] = [
+        ("\u{1F3BE}", "Tennis"),
+        ("\u{1F4AA}", "Strength training"),
+        ("\u{1F6B5}", "MTB ride"),
+        ("\u{1F3C3}", "Run"),
+        ("\u{1F97E}", "Walk / hike"),
+        ("\u{26BD}", "Sports / recreation"),
+        ("\u{1F3E1}", "Yard work"),
+        ("\u{26F7}\u{FE0F}", "Snow sports"),
+        ("\u{2795}", "Other")
+    ]
+
+    private var activityCard: some View {
+        CheckInCard(question: "Any other physical activity recently?") {
             VStack(spacing: 20) {
-                let contextOptions: [(String, String)] = [
-                    ("😴", "Slept poorly"),
-                    ("🤒", "Getting sick"),
-                    ("👶", "Toddler kept me up"),
-                    ("😵", "High stress"),
-                    ("🦵", "Sore legs"),
-                    ("💪", "Feel strong"),
-                    ("⏱", "Crunched for time")
-                ]
+                Text("Things outside your planned workouts can still affect recovery.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
 
                 FlowLayout(spacing: 10) {
-                    ForEach(contextOptions, id: \.1) { emoji, label in
+                    ForEach(activityOptions, id: \.1) { emoji, label in
+                        ContextChip(
+                            emoji: emoji,
+                            label: label,
+                            isSelected: selectedActivities.contains(label)
+                        ) {
+                            if selectedActivities.contains(label) {
+                                selectedActivities.remove(label)
+                            } else {
+                                selectedActivities.insert(label)
+                            }
+                        }
+                    }
+                }
+
+                if !selectedActivities.isEmpty {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("When?")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                            FlowLayout(spacing: 8) {
+                                ForEach(["Today", "Yesterday", "2\u{2013}3 days ago"], id: \.self) { option in
+                                    ContextChip(
+                                        label: option,
+                                        isSelected: activityTiming == option
+                                    ) {
+                                        activityTiming = activityTiming == option ? "" : option
+                                    }
+                                }
+                            }
+                        }
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("How hard did it feel?")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                            FlowLayout(spacing: 8) {
+                                ForEach(["Easy", "Moderate", "Hard", "Very hard"], id: \.self) { option in
+                                    ContextChip(
+                                        label: option,
+                                        isSelected: activityIntensity == option
+                                    ) {
+                                        activityIntensity = activityIntensity == option ? "" : option
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .transition(.opacity)
+                }
+
+                Button {
+                    advance()
+                } label: {
+                    Text(selectedActivities.isEmpty ? "Skip" : "Next")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+        }
+    }
+
+    // MARK: - Life Context Card
+
+    private let lifeContextOptions: [(String, String)] = [
+        ("\u{1F634}", "Poor sleep"),
+        ("\u{1F4BC}", "High work stress"),
+        ("\u{1F476}", "Family exhaustion"),
+        ("\u{2708}\u{FE0F}", "Travel"),
+        ("\u{1F62E}\u{200D}\u{1F4A8}", "Mentally drained"),
+        ("\u{1F912}", "Getting sick"),
+        ("\u{1F9B5}", "Sore legs"),
+        ("\u{1F610}", "Low motivation"),
+        ("\u{23F1}", "Busy day ahead"),
+        ("\u{2795}", "Other")
+    ]
+
+    private var lifeContextCard: some View {
+        CheckInCard(question: "How's life outside training?") {
+            VStack(spacing: 20) {
+                Text("Recovery isn't just workouts.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                FlowLayout(spacing: 10) {
+                    ForEach(lifeContextOptions, id: \.1) { emoji, label in
                         ContextChip(
                             emoji: emoji,
                             label: label,
@@ -178,23 +282,8 @@ struct CheckInView: View {
                     }
                 }
 
-                TextField("Any notes? (optional)", text: $notes, axis: .vertical)
-                    .lineLimit(2...4)
-                    .padding()
-                    .background(Color(.systemGray6))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-
                 Button {
-                    let checkIn = CheckIn(
-                        overallFeel: overallFeel,
-                        legs: legs,
-                        motivation: motivation,
-                        timeAvailable: timeAvailable,
-                        contextFlags: Array(selectedContextFlags),
-                        notes: notes.isEmpty ? nil : notes
-                    )
-                    appState.submit(checkIn: checkIn)
-                    if context == .updatingTodayPlan { dismiss() }
+                    submitCheckIn()
                 } label: {
                     Text("Submit")
                         .font(.headline)
@@ -205,6 +294,26 @@ struct CheckInView: View {
                 .controlSize(.large)
             }
         }
+    }
+
+    private func submitCheckIn() {
+        let activities = selectedActivities.map { type in
+            RecentActivity(
+                type: type,
+                timing: activityTiming.isEmpty ? nil : activityTiming,
+                intensity: activityIntensity.isEmpty ? nil : activityIntensity
+            )
+        }
+        let checkIn = CheckIn(
+            overallFeel: overallFeel,
+            legs: legs,
+            motivation: motivation,
+            timeAvailable: timeAvailable,
+            contextFlags: Array(selectedContextFlags),
+            recentActivities: activities
+        )
+        appState.submit(checkIn: checkIn)
+        if context == .updatingTodayPlan { dismiss() }
     }
 
     // MARK: - Helpers
@@ -298,7 +407,7 @@ struct OptionButton: View {
 }
 
 struct ContextChip: View {
-    let emoji: String
+    var emoji: String = ""
     let label: String
     let isSelected: Bool
     let action: () -> Void
@@ -306,8 +415,10 @@ struct ContextChip: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Text(emoji)
-                    .font(.body)
+                if !emoji.isEmpty {
+                    Text(emoji)
+                        .font(.body)
+                }
                 Text(label)
                     .font(.subheadline)
             }

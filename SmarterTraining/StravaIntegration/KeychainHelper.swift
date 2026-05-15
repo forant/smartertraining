@@ -3,9 +3,9 @@ import Security
 
 enum KeychainHelper {
 
-    private static let service = "com.timforan.SmarterTraining.strava"
+    private static let defaultService = "com.timforan.SmarterTraining.strava"
 
-    static func save(_ value: String, forKey key: String) {
+    static func save(_ value: String, forKey key: String, service: String = defaultService) {
         guard let data = value.data(using: .utf8) else { return }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -18,7 +18,7 @@ enum KeychainHelper {
         SecItemAdd(addQuery as CFDictionary, nil)
     }
 
-    static func read(forKey key: String) -> String? {
+    static func read(forKey key: String, service: String = defaultService) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -32,7 +32,7 @@ enum KeychainHelper {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete(forKey key: String) {
+    static func delete(forKey key: String, service: String = defaultService) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

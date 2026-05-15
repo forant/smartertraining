@@ -22,11 +22,24 @@ final class WorkoutEditor {
     let originalSteps: [TrainerWorkoutStep]
     let workoutType: WorkoutType
     let ftp: Int?
+    let checkIn: CheckIn?
+    let recentHistory: [WorkoutHistoryEntry]
+    let profile: UserProfile
 
-    init(steps: [TrainerWorkoutStep], workoutType: WorkoutType, ftp: Int?) {
+    init(
+        steps: [TrainerWorkoutStep],
+        workoutType: WorkoutType,
+        ftp: Int?,
+        checkIn: CheckIn? = nil,
+        recentHistory: [WorkoutHistoryEntry] = [],
+        profile: UserProfile = .empty
+    ) {
         self.originalSteps = steps
         self.workoutType = workoutType
         self.ftp = ftp
+        self.checkIn = checkIn
+        self.recentHistory = recentHistory
+        self.profile = profile
         self.groups = Self.groupSteps(steps)
     }
 
@@ -56,6 +69,18 @@ final class WorkoutEditor {
             }
             return count + 1
         }
+    }
+
+    var evaluation: WorkoutEditEvaluation {
+        let evaluator = WorkoutEditEvaluator(
+            workoutType: workoutType,
+            originalSteps: originalSteps,
+            editedSteps: toSteps(),
+            checkIn: checkIn,
+            recentHistory: recentHistory,
+            profile: profile
+        )
+        return evaluator.evaluate()
     }
 
     var intensityWarning: String? {
@@ -207,12 +232,8 @@ struct WorkoutEditorView: View {
                     }
                 }
 
-                if let warning = editor.intensityWarning {
-                    Section {
-                        Label(warning, systemImage: "exclamationmark.triangle.fill")
-                            .font(.subheadline)
-                            .foregroundStyle(.orange)
-                    }
+                if editor.evaluation.level != .neutral {
+                    evaluationSection(editor.evaluation)
                 }
 
                 if editor.isModified {
@@ -323,6 +344,42 @@ struct WorkoutEditorView: View {
                     .foregroundStyle(Color.accentColor)
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Evaluation Display
+
+    private func evaluationSection(_ eval: WorkoutEditEvaluation) -> some View {
+        Section {
+            VStack(alignment: .leading, spacing: 6) {
+                Label(eval.title, systemImage: evaluationIcon(eval.level))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(evaluationColor(eval.level))
+                Text(eval.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func evaluationIcon(_ level: WorkoutEditGuidanceLevel) -> String {
+        switch level {
+        case .neutral: "checkmark.circle"
+        case .encouragement: "hand.thumbsup.fill"
+        case .notice: "info.circle.fill"
+        case .caution: "exclamationmark.triangle.fill"
+        case .strongDiscourage: "exclamationmark.octagon.fill"
+        }
+    }
+
+    private func evaluationColor(_ level: WorkoutEditGuidanceLevel) -> Color {
+        switch level {
+        case .neutral: .secondary
+        case .encouragement: .green
+        case .notice: .blue
+        case .caution: .orange
+        case .strongDiscourage: .red
         }
     }
 

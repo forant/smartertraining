@@ -1,17 +1,27 @@
 import SwiftUI
+import AuthenticationServices
 
 struct TodayView: View {
     @Environment(AppState.self) private var appState
     @State private var showingCheckIn = false
     @State private var showingHistory = false
     @State private var showingRideSession = false
+    @State private var showingEditor = false
+    @State private var editor: WorkoutEditor?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
                     header
-                    WorkoutHeroCard(recommendation: appState.currentRecommendation)
+                    WorkoutHeroCard(
+                        recommendation: appState.currentRecommendation,
+                        isModified: editor?.isModified == true,
+                        onEdit: hasCyclingSteps ? {
+                            ensureEditor()
+                            showingEditor = true
+                        } : nil
+                    )
                     startWorkoutButton
                     coachCallout
 
@@ -29,6 +39,7 @@ struct TodayView: View {
                     )
 
                     actionButtons
+                    accountSection
                     #if DEBUG
                     debugSection
                     #endif
@@ -42,11 +53,23 @@ struct TodayView: View {
             .sheet(isPresented: $showingHistory) {
                 HistoryView()
             }
+            .sheet(isPresented: $showingEditor) {
+                if let editor {
+                    WorkoutEditorView(editor: editor)
+                }
+            }
             .fullScreenCover(isPresented: $showingRideSession) {
                 RideSessionView(
                     recommendation: appState.currentRecommendation,
-                    ftp: appState.userProfile.ftp
+                    ftp: appState.userProfile.ftp,
+                    checkIn: appState.latestCheckIn,
+                    recentHistory: appState.recentHistory,
+                    profile: appState.userProfile,
+                    existingEditor: editor
                 )
+            }
+            .onChange(of: appState.latestCheckIn?.timeAvailable) {
+                editor = nil
             }
         }
     }
@@ -111,6 +134,22 @@ struct TodayView: View {
         }
     }
 
+    private func ensureEditor() {
+        guard editor == nil else { return }
+        let steps = WorkoutConverter.convert(
+            recommendation: appState.currentRecommendation,
+            ftp: appState.userProfile.ftp
+        )
+        editor = WorkoutEditor(
+            steps: steps,
+            workoutType: appState.currentRecommendation.type,
+            ftp: appState.userProfile.ftp,
+            checkIn: appState.latestCheckIn,
+            recentHistory: appState.recentHistory,
+            profile: appState.userProfile
+        )
+    }
+
     // MARK: - Action Buttons
 
     private var actionButtons: some View {
@@ -137,6 +176,66 @@ struct TodayView: View {
             .tint(.secondary)
         }
         .padding(.top, 4)
+    }
+
+    // MARK: - Account
+
+    private var accountSection: some View {
+        VStack(spacing: 12) {
+            if appState.auth.isSignedIn {
+                HStack {
+                    Label(appState.sync.status.displayText, systemImage: syncIcon)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Sync Now") { appState.triggerSync() }
+                        .font(.subheadline)
+                }
+                .padding()
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                Button {
+                    appState.auth.signOut()
+                    appState.sync.updateAuthStatus()
+                } label: {
+                    Text("Sign Out")
+                        .font(.subheadline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+            } else {
+                SignInWithAppleButton(.signIn) { request in
+                    request.requestedScopes = [.fullName, .email]
+                } onCompletion: { result in
+                    switch result {
+                    case .success(let authorization):
+                        Task {
+                            try? await appState.auth.handleSignIn(authorization: authorization)
+                            appState.sync.updateAuthStatus()
+                            appState.triggerSync()
+                        }
+                    case .failure:
+                        break
+                    }
+                }
+                .signInWithAppleButtonStyle(.black)
+                .frame(height: 50)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .padding(.top, 4)
+    }
+
+    private var syncIcon: String {
+        switch appState.sync.status {
+        case .notSignedIn: "person.crop.circle.badge.xmark"
+        case .idle: "arrow.triangle.2.circlepath"
+        case .syncing: "arrow.triangle.2.circlepath.circle"
+        case .synced: "checkmark.circle.fill"
+        case .error: "exclamationmark.triangle"
+        }
     }
 
     #if DEBUG
@@ -176,6 +275,33 @@ struct TodayView: View {
                     .tint(.red)
             }
             .font(.caption)
+
+            Divider()
+            Text("Sync Debug")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+
+            HStack(spacing: 8) {
+                Text("Pending: \(appState.store.pendingSyncRecords().count)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("Status: \(appState.sync.status.displayText)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 12) {
+                Button("Force Sync") { appState.triggerSync() }
+                Button("Clear Sync State") { appState.sync.debugClearSyncState() }
+                    .tint(.orange)
+                Button("Sign Out") {
+                    appState.auth.signOut()
+                    appState.sync.updateAuthStatus()
+                }
+                .tint(.red)
+            }
+            .font(.caption)
         }
         .padding(.top, 16)
     }
@@ -186,17 +312,36 @@ struct TodayView: View {
 
 struct WorkoutHeroCard: View {
     let recommendation: WorkoutRecommendation
+    var isModified: Bool = false
+    var onEdit: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(recommendation.title)
-                    .font(.title)
-                    .fontWeight(.bold)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(recommendation.title)
+                        .font(.title)
+                        .fontWeight(.bold)
 
-                Text(recommendation.summary)
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
+                    Text(recommendation.summary)
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let onEdit {
+                    Button(action: onEdit) {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if isModified {
+                Label("Modified from recommendation", systemImage: "pencil")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
             }
 
             Divider()
@@ -300,8 +445,20 @@ struct CheckInSummaryCard: View {
                 summaryItem("Time", value: "\(checkIn.timeAvailable) min")
             }
 
+            if !checkIn.recentActivities.isEmpty {
+                let summary = checkIn.recentActivities.map { a in
+                    var parts = [a.type]
+                    if let t = a.timing { parts.append(t.lowercased()) }
+                    if let i = a.intensity { parts.append(i.lowercased()) }
+                    return parts.joined(separator: " \u{00B7} ")
+                }.joined(separator: ", ")
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
             if !checkIn.contextFlags.isEmpty {
-                Text(checkIn.contextFlags.joined(separator: " · "))
+                Text(checkIn.contextFlags.joined(separator: " \u{00B7} "))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }

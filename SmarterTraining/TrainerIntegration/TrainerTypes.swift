@@ -41,7 +41,7 @@ enum TrainerConnectionState: Equatable {
     }
 }
 
-struct TrainerMetrics {
+struct TrainerMetrics: Codable {
     var power: Int?
     var cadence: Double?
     var speed: Double?

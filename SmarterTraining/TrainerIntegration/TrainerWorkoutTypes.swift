@@ -1,11 +1,19 @@
 import Foundation
 
-struct TrainerWorkoutStep: Identifiable {
-    let id = UUID()
+struct TrainerWorkoutStep: Codable, Identifiable {
+    let id: UUID
     var name: String
     var duration: TimeInterval
     var targetPower: Int
     var role: WorkoutStepRole
+
+    init(id: UUID = UUID(), name: String, duration: TimeInterval, targetPower: Int, role: WorkoutStepRole) {
+        self.id = id
+        self.name = name
+        self.duration = duration
+        self.targetPower = targetPower
+        self.role = role
+    }
 }
 
 enum WorkoutConverter {

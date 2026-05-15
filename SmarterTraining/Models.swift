@@ -55,13 +55,53 @@ struct UserProfile: Codable {
     static let empty = UserProfile(name: nil, currentState: nil, goals: [], typicalAvailability: nil, trainingFrequency: nil, equipment: [], ftp: nil)
 }
 
-struct CheckIn: Codable {
+struct RecentActivity: Codable, Equatable {
+    var type: String
+    var timing: String?
+    var intensity: String?
+}
+
+struct CheckIn: Codable, Identifiable {
+    let id: UUID
     var overallFeel: String
     var legs: String
     var motivation: String
     var timeAvailable: Int
+    var recentActivities: [RecentActivity]
     var contextFlags: [String]
     var notes: String?
+
+    init(
+        id: UUID = UUID(),
+        overallFeel: String,
+        legs: String,
+        motivation: String,
+        timeAvailable: Int,
+        contextFlags: [String],
+        recentActivities: [RecentActivity] = [],
+        notes: String? = nil
+    ) {
+        self.id = id
+        self.overallFeel = overallFeel
+        self.legs = legs
+        self.motivation = motivation
+        self.timeAvailable = timeAvailable
+        self.recentActivities = recentActivities
+        self.contextFlags = contextFlags
+        self.notes = notes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        overallFeel = try container.decode(String.self, forKey: .overallFeel)
+        legs = try container.decode(String.self, forKey: .legs)
+        motivation = try container.decode(String.self, forKey: .motivation)
+        timeAvailable = try container.decode(Int.self, forKey: .timeAvailable)
+        recentActivities = try container.decodeIfPresent([RecentActivity].self, forKey: .recentActivities) ?? []
+        contextFlags = try container.decode([String].self, forKey: .contextFlags)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+    }
 }
 
 enum WorkoutType: String, Codable {
@@ -78,15 +118,15 @@ enum WorkoutType: String, Codable {
     }
 }
 
-enum WorkoutStepRole {
+enum WorkoutStepRole: String, Codable {
     case warmup, primary, cooldown, accessory
 }
 
-enum WorkoutStepModality {
+enum WorkoutStepModality: String, Codable {
     case cycling, strength, mobility, recovery
 }
 
-struct WorkoutStep {
+struct WorkoutStep: Codable {
     var role: WorkoutStepRole
     var modality: WorkoutStepModality
     var name: String
@@ -94,7 +134,7 @@ struct WorkoutStep {
     var targetText: String
 }
 
-struct WorkoutRecommendation {
+struct WorkoutRecommendation: Codable {
     var type: WorkoutType
     var title: String
     var summary: String
@@ -128,12 +168,43 @@ enum WorkoutFeedback: String, Codable {
     }
 }
 
-struct WorkoutHistoryEntry {
+struct WorkoutHistoryEntry: Codable, Identifiable {
+    let id: UUID
     var date: Date
     var title: String
     var type: WorkoutType
     var checkIn: CheckIn?
     var feedback: WorkoutFeedback?
+    var feedbackAt: Date?
+
+    init(
+        id: UUID = UUID(),
+        date: Date = Date(),
+        title: String,
+        type: WorkoutType,
+        checkIn: CheckIn? = nil,
+        feedback: WorkoutFeedback? = nil,
+        feedbackAt: Date? = nil
+    ) {
+        self.id = id
+        self.date = date
+        self.title = title
+        self.type = type
+        self.checkIn = checkIn
+        self.feedback = feedback
+        self.feedbackAt = feedbackAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        date = try container.decode(Date.self, forKey: .date)
+        title = try container.decode(String.self, forKey: .title)
+        type = try container.decode(WorkoutType.self, forKey: .type)
+        checkIn = try container.decodeIfPresent(CheckIn.self, forKey: .checkIn)
+        feedback = try container.decodeIfPresent(WorkoutFeedback.self, forKey: .feedback)
+        feedbackAt = try container.decodeIfPresent(Date.self, forKey: .feedbackAt)
+    }
 }
 
 enum CheckInPresentationContext {
@@ -171,7 +242,10 @@ final class AppState {
     var todayFeedback: WorkoutFeedback?
     private(set) var recentHistory: [WorkoutHistoryEntry] = []
 
-    private static let maxHistoryCount = 5
+    let store = LocalStore()
+    let auth = BackendAuthService()
+    private(set) var sync: BackendSyncService!
+    private static let maxHistoryCount = 30
 
     private let defaults = UserDefaults.standard
     private enum Keys {
@@ -193,6 +267,12 @@ final class AppState {
             latestCheckIn = saved
             currentRecommendation = generateRecommendation(for: saved)
         }
+        recentHistory = store.loadWorkouts().suffix(Self.maxHistoryCount)
+        if let last = recentHistory.last,
+           Calendar.current.isDateInToday(last.date) {
+            todayFeedback = last.feedback
+        }
+        sync = BackendSyncService(auth: auth, store: store)
     }
 
     func completeOnboarding(profile: UserProfile) {
@@ -225,13 +305,22 @@ final class AppState {
         currentRecommendation = recommendation
         appendToHistory(recommendation: recommendation, checkIn: checkIn)
         persist(checkIn: checkIn)
+        triggerSync()
     }
 
     func submitFeedback(_ feedback: WorkoutFeedback) {
         todayFeedback = feedback
         if let lastIndex = recentHistory.indices.last {
             recentHistory[lastIndex].feedback = feedback
+            recentHistory[lastIndex].feedbackAt = Date()
+            store.saveWorkouts(Array(recentHistory))
         }
+        triggerSync()
+    }
+
+    func triggerSync() {
+        guard auth.isSignedIn else { return }
+        Task { await sync.sync() }
     }
 
     #if DEBUG
@@ -262,21 +351,22 @@ final class AppState {
         case .quality: title = "Threshold Intervals"
         }
 
-        let entry = WorkoutHistoryEntry(date: date, title: title, type: type, checkIn: nil)
+        let entry = WorkoutHistoryEntry(date: date, title: title, type: type)
         recentHistory.insert(entry, at: 0)
         if recentHistory.count > Self.maxHistoryCount {
             recentHistory = Array(recentHistory.suffix(Self.maxHistoryCount))
         }
+        store.saveWorkouts(Array(recentHistory))
     }
 
     func debugClearHistory() {
         recentHistory.removeAll()
+        store.saveWorkouts([])
     }
     #endif
 
     private func appendToHistory(recommendation: WorkoutRecommendation, checkIn: CheckIn) {
         let entry = WorkoutHistoryEntry(
-            date: Date(),
             title: recommendation.title,
             type: recommendation.type,
             checkIn: checkIn
@@ -285,6 +375,7 @@ final class AppState {
         if recentHistory.count > Self.maxHistoryCount {
             recentHistory.removeFirst(recentHistory.count - Self.maxHistoryCount)
         }
+        store.saveWorkouts(Array(recentHistory))
     }
 
     private func persist(checkIn: CheckIn) {
@@ -298,11 +389,19 @@ final class AppState {
 
     private let engine = RecommendationEngine()
 
+    private func buildMemorySummary() -> TrainingMemorySummary {
+        TrainingMemoryBuilder.build(
+            history: recentHistory,
+            rides: store.finishedRides()
+        )
+    }
+
     private func generateRecommendation(for checkIn: CheckIn) -> WorkoutRecommendation {
         let inputs = RecommendationEngine.Inputs(
             profile: userProfile,
             checkIn: checkIn,
-            recentHistory: recentHistory
+            recentHistory: recentHistory,
+            memorySummary: buildMemorySummary()
         )
         return engine.recommend(for: inputs)
     }

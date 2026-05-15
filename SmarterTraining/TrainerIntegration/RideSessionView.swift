@@ -3,8 +3,13 @@ import SwiftUI
 struct RideSessionView: View {
     let recommendation: WorkoutRecommendation
     let ftp: Int?
+    var checkIn: CheckIn?
+    var recentHistory: [WorkoutHistoryEntry] = []
+    var profile: UserProfile = .empty
+    var existingEditor: WorkoutEditor?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
     @State private var manager = FTMSManager()
     @State private var runtime: TrainerWorkoutRuntime?
     @State private var phase: SessionPhase = .connecting
@@ -12,6 +17,8 @@ struct RideSessionView: View {
     @State private var ergToggle = false
     @State private var editor: WorkoutEditor?
     @State private var showingEditor = false
+
+    private static let saveIntervalSeconds = 10
 
     private enum SessionPhase {
         case connecting
@@ -27,8 +34,19 @@ struct RideSessionView: View {
                 case .connecting:
                     TrainerConnectionView(manager: manager) {
                         phase = .ready
-                        let steps = WorkoutConverter.convert(recommendation: recommendation, ftp: ftp)
-                        editor = WorkoutEditor(steps: steps, workoutType: recommendation.type, ftp: ftp)
+                        if let existingEditor {
+                            editor = existingEditor
+                        } else {
+                            let steps = WorkoutConverter.convert(recommendation: recommendation, ftp: ftp)
+                            editor = WorkoutEditor(
+                                steps: steps,
+                                workoutType: recommendation.type,
+                                ftp: ftp,
+                                checkIn: checkIn,
+                                recentHistory: recentHistory,
+                                profile: profile
+                            )
+                        }
                     }
                 case .ready:
                     readyView
@@ -100,15 +118,7 @@ struct RideSessionView: View {
 
             VStack(spacing: 12) {
                 Button {
-                    if let editor {
-                        runtime = TrainerWorkoutRuntime(
-                            steps: editor.toSteps(),
-                            trainerManager: manager
-                        )
-                        runtime?.ergEnabled = ergToggle
-                    }
-                    phase = .riding
-                    runtime?.start()
+                    startRide()
                 } label: {
                     Text("Start Workout")
                         .font(.headline)
@@ -146,6 +156,26 @@ struct RideSessionView: View {
                 WorkoutEditorView(editor: editor)
             }
         }
+    }
+
+    private func startRide() {
+        guard let editor else { return }
+        runtime = TrainerWorkoutRuntime(
+            steps: editor.toSteps(),
+            trainerManager: manager
+        )
+        runtime?.ergEnabled = ergToggle
+
+        let ride = CompletedWorkout(
+            startDate: Date(),
+            title: recommendation.title,
+            status: .inProgress
+        )
+        completedWorkout = ride
+        appState.store.saveRide(ride)
+
+        phase = .riding
+        runtime?.start()
     }
 
     private var ergToggleSection: some View {
@@ -188,13 +218,13 @@ struct RideSessionView: View {
         .padding()
         .onChange(of: runtime.state) { _, newState in
             if newState == .finished {
-                completedWorkout = CompletedWorkout(
-                    startDate: runtime.startDate ?? Date(),
-                    duration: runtime.totalElapsed,
-                    title: recommendation.title,
-                    samples: runtime.samples
-                )
-                phase = .finished
+                finishRide(runtime)
+            }
+        }
+        .onChange(of: runtime.totalElapsed) { _, elapsed in
+            let tick = Int(elapsed)
+            if tick > 0 && tick % Self.saveIntervalSeconds == 0 {
+                saveRideSnapshot(runtime)
             }
         }
         .onChange(of: manager.connectionState) { _, newState in
@@ -202,6 +232,34 @@ struct RideSessionView: View {
                 runtime.pause()
             }
         }
+    }
+
+    private func saveRideSnapshot(_ runtime: TrainerWorkoutRuntime) {
+        guard var ride = completedWorkout else { return }
+        ride.duration = runtime.totalElapsed
+        ride.samples = runtime.samples
+        appState.store.saveRide(ride)
+    }
+
+    private func finishRide(_ runtime: TrainerWorkoutRuntime) {
+        if var ride = completedWorkout {
+            ride.duration = runtime.totalElapsed
+            ride.samples = runtime.samples
+            ride.status = .finished
+            completedWorkout = ride
+            appState.store.saveRide(ride)
+        } else {
+            completedWorkout = CompletedWorkout(
+                startDate: runtime.startDate ?? Date(),
+                duration: runtime.totalElapsed,
+                title: recommendation.title,
+                samples: runtime.samples,
+                status: .finished
+            )
+            appState.store.saveRide(completedWorkout!)
+        }
+        phase = .finished
+        appState.triggerSync()
     }
 
     @ViewBuilder
@@ -385,6 +443,10 @@ struct RideSessionView: View {
                 if let workout = completedWorkout {
                     StravaPostView(workout: workout) {
                         completedWorkout?.isPostedToStrava = true
+                        if var ride = completedWorkout {
+                            ride.isPostedToStrava = true
+                            appState.store.saveRide(ride)
+                        }
                     }
                 }
 

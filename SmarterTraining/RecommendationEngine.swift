@@ -8,6 +8,7 @@ struct RecommendationEngine {
         var profile: UserProfile
         var checkIn: CheckIn
         var recentHistory: [WorkoutHistoryEntry]
+        var memorySummary: TrainingMemorySummary = .empty
     }
 
     func recommend(for inputs: Inputs) -> WorkoutRecommendation {
@@ -57,6 +58,28 @@ struct RecommendationEngine {
             && !eq.isSubset(of: [.noEquipment, .bikeTrainer, .outdoorBike])
     }
 
+    // MARK: - Activity Stress
+
+    func activityStress(from checkIn: CheckIn) -> Int {
+        guard !checkIn.recentActivities.isEmpty else { return 0 }
+
+        let hardRecent = checkIn.recentActivities.filter { a in
+            let isHard = a.intensity == "Hard" || a.intensity == "Very hard"
+            let isRecent = a.timing == "Today" || a.timing == "Yesterday"
+            return isHard && isRecent
+        }
+
+        if hardRecent.contains(where: { $0.intensity == "Very hard" }) { return 2 }
+        if !hardRecent.isEmpty { return 1 }
+
+        let moderateToday = checkIn.recentActivities.filter {
+            $0.intensity == "Moderate" && $0.timing == "Today"
+        }
+        if !moderateToday.isEmpty { return 1 }
+
+        return 0
+    }
+
     // MARK: - Type Selection
 
     func chooseWorkoutType(for inputs: Inputs) -> WorkoutType {
@@ -64,6 +87,9 @@ struct RecommendationEngine {
         let lastFeedback = inputs.recentHistory.last?.feedback
         let lastType = inputs.recentHistory.last?.type
         let willingness = qualityWillingness(for: inputs.profile)
+        let memory = inputs.memorySummary
+        let todayActStress = activityStress(from: checkIn)
+        let actStress = max(todayActStress, memoryActivityStress(memory))
 
         // Step A: Hard recovery overrides
         if checkIn.overallFeel == "Bad" || checkIn.contextFlags.contains("Getting sick") {
@@ -75,6 +101,22 @@ struct RecommendationEngine {
         if checkIn.overallFeel == "Okay" && checkIn.motivation == "Low" && checkIn.legs == "Heavy" {
             return .recovery
         }
+        if checkIn.contextFlags.contains("Poor sleep") && checkIn.legs == "Heavy" {
+            return .recovery
+        }
+
+        // Step A2: Activity-based overrides
+        if actStress >= 2 && checkIn.overallFeel != "Great" {
+            return checkIn.legs == "Heavy" ? .recovery : .endurance
+        }
+
+        // Step A3: Training memory — returning after extended break
+        if memory.isReturningAfterBreak {
+            if checkIn.overallFeel != "Great" || checkIn.legs != "Fresh" {
+                return .recovery
+            }
+            return .endurance
+        }
 
         // Step B: Prior feedback — tooMuch is a strong signal
         if lastFeedback == .tooMuch {
@@ -82,6 +124,13 @@ struct RecommendationEngine {
                 return .recovery
             }
             return .endurance
+        }
+
+        // Step B2: Training memory — tooMuch in recent window
+        if memory.hadTooMuchFeedback7d && lastFeedback != .tooMuch {
+            if checkIn.legs == "Heavy" || checkIn.overallFeel == "Okay" {
+                return .endurance
+            }
         }
 
         // Step C: History guardrails — no back-to-back quality
@@ -92,8 +141,8 @@ struct RecommendationEngine {
             return .endurance
         }
 
-        // Step D: Prior feedback — hard mildly discourages quality
-        let hardBias = lastFeedback == .hard
+        // Step D: Prior feedback — hard mildly discourages quality; hard activity does too
+        let hardBias = lastFeedback == .hard || actStress >= 2 || memory.hadTooMuchFeedback7d
 
         // Step E: After easier stretch, allow quality if signals support it
         let recentTypes = inputs.recentHistory.suffix(3).map(\.type)
@@ -106,7 +155,10 @@ struct RecommendationEngine {
 
         let qualityHistoryThreshold = willingness >= 1 ? 1 : 2
 
-        if easierCount >= qualityHistoryThreshold && signalsStrong && !hardBias && willingness > -2 {
+        let weekLoadHigh = memory.hasHighRecentLoad
+            || (memory.hardDayCount7d >= 2 && memory.recentLifeStressLevel >= 2)
+
+        if !weekLoadHigh && easierCount >= qualityHistoryThreshold && signalsStrong && !hardBias && willingness > -2 && actStress < 2 {
             return .quality
         }
 
@@ -116,21 +168,23 @@ struct RecommendationEngine {
         }
 
         // Fresh legs + good signals can open quality
-        if checkIn.legs == "Fresh"
+        if !weekLoadHigh && checkIn.legs == "Fresh"
             && checkIn.overallFeel == "Great"
             && checkIn.motivation == "High"
             && lastType != .quality
             && !hardBias
-            && willingness >= -1 {
+            && willingness >= -1
+            && actStress == 0 {
             return .quality
         }
 
         // Easy boost
-        if easyBoost
+        if !weekLoadHigh && easyBoost
             && signalsStrong
             && easierCount >= 1
             && lastType != .quality
-            && willingness >= 0 {
+            && willingness >= 0
+            && actStress == 0 {
             return .quality
         }
 
@@ -147,18 +201,29 @@ struct RecommendationEngine {
         let recentTypes = inputs.recentHistory.suffix(3).map(\.type)
         let easierCount = recentTypes.filter({ $0 == .endurance || $0 == .recovery }).count
         let historyCount = inputs.recentHistory.count
+        let actStress = activityStress(from: checkIn)
+        let memory = inputs.memorySummary
 
         switch type {
         case .recovery:
-            return buildRecoveryReason(checkIn: checkIn, lastFeedback: lastFeedback, historyCount: historyCount)
+            return buildRecoveryReason(checkIn: checkIn, lastFeedback: lastFeedback, historyCount: historyCount, actStress: actStress, memory: memory)
         case .endurance:
-            return buildEnduranceReason(checkIn: checkIn, lastType: lastType, lastFeedback: lastFeedback, easierCount: easierCount, profile: inputs.profile)
+            return buildEnduranceReason(checkIn: checkIn, lastType: lastType, lastFeedback: lastFeedback, easierCount: easierCount, profile: inputs.profile, actStress: actStress, memory: memory)
         case .quality:
-            return buildQualityReason(checkIn: checkIn, lastFeedback: lastFeedback, easierCount: easierCount, profile: inputs.profile)
+            return buildQualityReason(checkIn: checkIn, lastFeedback: lastFeedback, easierCount: easierCount, profile: inputs.profile, memory: memory)
         }
     }
 
-    private func buildRecoveryReason(checkIn: CheckIn, lastFeedback: WorkoutFeedback?, historyCount: Int) -> String {
+    private func buildRecoveryReason(checkIn: CheckIn, lastFeedback: WorkoutFeedback?, historyCount: Int, actStress: Int, memory: TrainingMemorySummary) -> String {
+        if actStress >= 2 && checkIn.legs == "Heavy" {
+            let activityName = hardRecentActivityName(from: checkIn) ?? "recent activity"
+            return "Your \(activityName) was hard and your legs are still feeling it. Easy recovery today lets your body catch up."
+        }
+
+        if checkIn.contextFlags.contains("Poor sleep") && checkIn.legs == "Heavy" {
+            return "Poor sleep and heavy legs are both saying the same thing. Recovery keeps you moving without digging a hole."
+        }
+
         if checkIn.contextFlags.contains("Getting sick") {
             if checkIn.legs == "Dead" || checkIn.overallFeel == "Bad" {
                 return "It looks like you might be getting sick and your body is already showing it. Taking it easy today is the right call."
@@ -191,17 +256,49 @@ struct RecommendationEngine {
         }
 
         if checkIn.motivation == "Low" && checkIn.legs == "Heavy" {
+            if memory.completedWorkoutCount7d >= 3 {
+                return "You've been consistent this week, and heavy legs with low motivation is a clear signal. Smart recovery keeps the streak going."
+            }
             return "Heavy legs and low motivation both point the same way. Easy recovery keeps you on track."
+        }
+
+        if memory.isReturningAfterBreak {
+            return "After a few days off, this rebuilds momentum without overreaching."
         }
 
         if historyCount == 0 {
             return "Today's signals suggest starting easy. A light recovery session is the right first step."
         }
 
+        if memory.completedWorkoutCount7d >= 3 {
+            return "You've been showing up consistently. A recovery day is part of training smart, not a step back."
+        }
+
         return "Today's signals point toward recovery. Easy does it."
     }
 
-    private func buildEnduranceReason(checkIn: CheckIn, lastType: WorkoutType?, lastFeedback: WorkoutFeedback?, easierCount: Int, profile: UserProfile) -> String {
+    private func buildEnduranceReason(checkIn: CheckIn, lastType: WorkoutType?, lastFeedback: WorkoutFeedback?, easierCount: Int, profile: UserProfile, actStress: Int, memory: TrainingMemorySummary) -> String {
+        if actStress >= 2 {
+            let activityName = hardRecentActivityName(from: checkIn) ?? "recent activity"
+            return "Your \(activityName) added real load. Steady aerobic work today lets you absorb that without piling on."
+        }
+        if actStress >= 1 && checkIn.legs == "Heavy" {
+            let activityName = hardRecentActivityName(from: checkIn) ?? "recent activity"
+            return "Between your \(activityName) and heavy legs, a controlled endurance ride is the right call."
+        }
+
+        if memory.hasHighRecentLoad {
+            return "You've already had \(memory.hardDayCount7d) harder days this week. Steady aerobic work keeps things balanced."
+        }
+
+        if memoryActivityStress(memory) >= 1, let name = memoryHardActivityName(memory) {
+            return "Your recent \(name) counts as meaningful stress. Steady aerobic work today keeps things balanced."
+        }
+
+        if memory.isReturningAfterBreak {
+            return "After a few days off, this gets you moving again without jumping back in too hard."
+        }
+
         if lastFeedback == .tooMuch {
             if checkIn.overallFeel == "Good" || checkIn.overallFeel == "Great" {
                 return "Yesterday felt like too much, but you're bouncing back well. Steady aerobic work lets you build without overdoing it."
@@ -247,10 +344,14 @@ struct RecommendationEngine {
             return "You're in a good spot today. Steady aerobic work makes the most of where you are."
         }
 
+        if memory.completedWorkoutCount7d >= 4 {
+            return "You've been consistent lately, so today can stay aerobic."
+        }
+
         return "Today's inputs line up well for steady endurance work. Controlled effort, nothing forced."
     }
 
-    private func buildQualityReason(checkIn: CheckIn, lastFeedback: WorkoutFeedback?, easierCount: Int, profile: UserProfile) -> String {
+    private func buildQualityReason(checkIn: CheckIn, lastFeedback: WorkoutFeedback?, easierCount: Int, profile: UserProfile, memory: TrainingMemorySummary) -> String {
         let highWillingness = qualityWillingness(for: profile) >= 1
 
         if lastFeedback == .easy && easierCount >= 1 {
@@ -280,6 +381,10 @@ struct RecommendationEngine {
 
         if checkIn.legs == "Fresh" {
             return "Fresh legs are a good foundation. Today is a chance for some focused intensity."
+        }
+
+        if memory.completedWorkoutCount7d >= 2 && memory.recentIntensityLoadEstimate <= 4 {
+            return "Your recent load has been manageable and today's signals are strong. Good conditions for quality work."
         }
 
         return "Your signals are strong today, so the focus is quality. Controlled intensity with purpose."
@@ -442,5 +547,33 @@ struct RecommendationEngine {
         }
 
         return extras
+    }
+
+    // MARK: - Helpers
+
+    private func hardRecentActivityName(from checkIn: CheckIn) -> String? {
+        checkIn.recentActivities
+            .filter { ($0.intensity == "Hard" || $0.intensity == "Very hard") && ($0.timing == "Today" || $0.timing == "Yesterday") }
+            .first
+            .map { $0.type.lowercased() }
+    }
+
+    // MARK: - Training Memory Helpers
+
+    func memoryActivityStress(_ memory: TrainingMemorySummary) -> Int {
+        let hard = memory.recentActivities.filter {
+            $0.intensity == "Hard" || $0.intensity == "Very hard"
+        }
+        if hard.contains(where: { $0.intensity == "Very hard" }) { return 2 }
+        if hard.count >= 2 { return 2 }
+        if !hard.isEmpty { return 1 }
+        return 0
+    }
+
+    private func memoryHardActivityName(_ memory: TrainingMemorySummary) -> String? {
+        memory.recentActivities
+            .filter { $0.intensity == "Hard" || $0.intensity == "Very hard" }
+            .first
+            .map { $0.type.lowercased() }
     }
 }

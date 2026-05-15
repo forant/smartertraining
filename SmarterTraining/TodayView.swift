@@ -1,5 +1,4 @@
 import SwiftUI
-import AuthenticationServices
 
 struct TodayView: View {
     @Environment(AppState.self) private var appState
@@ -7,20 +6,8 @@ struct TodayView: View {
     @State private var showingHistory = false
     @State private var showingRideSession = false
     @State private var showingEditor = false
+    @State private var showingSettings = false
     @State private var editor: WorkoutEditor?
-    @State private var signInResult: SignInResult?
-
-    private enum SignInResult: Identifiable {
-        case success
-        case failure(String)
-
-        var id: String {
-            switch self {
-            case .success: "success"
-            case .failure(let msg): "failure:\(msg)"
-            }
-        }
-    }
 
     var body: some View {
         NavigationStack {
@@ -52,19 +39,28 @@ struct TodayView: View {
                     )
 
                     actionButtons
-                    accountSection
-                    #if DEBUG
-                    debugSection
-                    #endif
                 }
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
             .sheet(isPresented: $showingCheckIn) {
                 CheckInView()
             }
             .sheet(isPresented: $showingHistory) {
                 HistoryView()
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView()
             }
             .sheet(isPresented: $showingEditor) {
                 if let editor {
@@ -191,194 +187,6 @@ struct TodayView: View {
         .padding(.top, 4)
     }
 
-    // MARK: - Account
-
-    private var accountSection: some View {
-        VStack(spacing: 12) {
-            if appState.auth.isSignedIn {
-                HStack {
-                    Label(appState.sync.status.displayText, systemImage: syncIcon)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Sync Now") { appState.triggerSync() }
-                        .font(.subheadline)
-                }
-                .padding()
-                .background(Color(.secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-
-                Button {
-                    appState.auth.signOut()
-                    appState.sync.updateAuthStatus()
-                } label: {
-                    Text("Sign Out")
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .tint(.secondary)
-            } else {
-                SignInWithAppleButton(.signIn) { request in
-                    request.requestedScopes = [.fullName, .email]
-                } onCompletion: { result in
-                    switch result {
-                    case .success(let authorization):
-                        Task {
-                            do {
-                                try await appState.auth.handleSignIn(authorization: authorization)
-                                appState.sync.updateAuthStatus()
-                                appState.triggerSync()
-                                signInResult = .success
-                            } catch {
-                                signInResult = .failure(error.localizedDescription)
-                            }
-                        }
-                    case .failure(let error):
-                        signInResult = .failure(error.localizedDescription)
-                    }
-                }
-                .signInWithAppleButtonStyle(.black)
-                .frame(height: 50)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-
-                if let signInResult {
-                    signInResultBanner(signInResult)
-                }
-            }
-        }
-        .padding(.top, 4)
-    }
-
-    @ViewBuilder
-    private func signInResultBanner(_ result: SignInResult) -> some View {
-        switch result {
-        case .success:
-            Label("Signed in successfully", systemImage: "checkmark.circle.fill")
-                .font(.subheadline)
-                .foregroundStyle(.green)
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(Color.green.opacity(0.1))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-        case .failure(let message):
-            VStack(spacing: 6) {
-                Label("Sign in failed", systemImage: "exclamationmark.triangle.fill")
-                    .font(.subheadline)
-                    .foregroundStyle(.red)
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(Color.red.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-    }
-
-    private var syncIcon: String {
-        switch appState.sync.status {
-        case .notSignedIn: "person.crop.circle.badge.xmark"
-        case .idle: "arrow.triangle.2.circlepath"
-        case .syncing: "arrow.triangle.2.circlepath.circle"
-        case .synced: "checkmark.circle.fill"
-        case .error: "exclamationmark.triangle"
-        }
-    }
-
-    #if DEBUG
-    private var debugSection: some View {
-        VStack(spacing: 8) {
-            Divider()
-            Text("Debug")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-
-            if !appState.recentHistory.isEmpty {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("History (\(appState.recentHistory.count))")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                    ForEach(Array(appState.recentHistory.enumerated()), id: \.offset) { _, entry in
-                        Text("\(entry.type.rawValue) — \(entry.date.formatted(.dateTime.month().day()))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            HStack(spacing: 8) {
-                Button("+ Recovery") { appState.debugSeedWorkout(type: .recovery) }
-                Button("+ Endurance") { appState.debugSeedWorkout(type: .endurance) }
-                Button("+ Quality") { appState.debugSeedWorkout(type: .quality) }
-            }
-            .font(.caption)
-
-            HStack(spacing: 12) {
-                Button("Clear History") { appState.debugClearHistory() }
-                    .tint(.orange)
-                Button("Reset Today") { appState.resetToday() }
-                    .tint(.red)
-                Button("Reset Onboarding") { appState.resetOnboarding() }
-                    .tint(.red)
-            }
-            .font(.caption)
-
-            Divider()
-            Text("Sync Debug")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-
-            let summary = appState.store.syncMetadataSummary()
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    Text("Pending: \(summary.pendingCount)")
-                    Text("Synced: \(summary.syncedCount)")
-                    Text("Failed: \(summary.failedCount)")
-                        .foregroundStyle(summary.failedCount > 0 ? .red : .secondary)
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-                if let lastAttempt = summary.lastAttempt {
-                    Text("Last attempt: \(lastAttempt.formatted(.dateTime.hour().minute().second()))")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                if let lastSuccess = summary.lastSuccess {
-                    Text("Last success: \(lastSuccess.formatted(.dateTime.hour().minute().second()))")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
-                if !summary.recentFailures.isEmpty {
-                    Text("Failures: \(summary.recentFailures.joined(separator: ", "))")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                        .lineLimit(2)
-                }
-
-                Text("Service: \(appState.sync.status.displayText)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            HStack(spacing: 12) {
-                Button("Force Sync") { appState.triggerSync() }
-                Button("Clear Sync State") { appState.sync.debugClearSyncState() }
-                    .tint(.orange)
-                Button("Sign Out") {
-                    appState.auth.signOut()
-                    appState.sync.updateAuthStatus()
-                }
-                .tint(.red)
-            }
-            .font(.caption)
-        }
-        .padding(.top, 16)
-    }
-    #endif
 }
 
 // MARK: - Workout Hero Card

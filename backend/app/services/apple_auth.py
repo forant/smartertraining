@@ -67,9 +67,10 @@ async def verify_apple_identity_token(
 
     except jwt.InvalidAudienceError:
         logger.warning(
-            "Apple token audience mismatch: expected %s", bundle_id
+            "Apple token audience mismatch: got %s, expected %s",
+            token_aud, bundle_id,
         )
-        return None, f"Audience mismatch (expected {bundle_id})"
+        return None, f"Audience mismatch (got {token_aud}, expected {bundle_id})"
     except jwt.ExpiredSignatureError:
         logger.warning("Apple token expired")
         return None, "Token expired"

@@ -37,6 +37,7 @@ final class StravaAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
 
     func authorize() async throws {
         guard StravaConfig.isConfigured else { throw StravaError.notConfigured }
+        AnalyticsService.shared.track(.stravaConnectStarted)
 
         var components = URLComponents(string: StravaConfig.authBaseURL)!
         components.queryItems = [
@@ -173,6 +174,7 @@ final class StravaAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
         }
 
         isConnected = true
+        AnalyticsService.shared.track(.stravaConnected)
     }
 
     private func loadFromKeychain() {

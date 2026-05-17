@@ -28,6 +28,8 @@ final class HealthKitManager {
     func requestAuthorization() async {
         guard let healthStore else { return }
 
+        AnalyticsService.shared.track(.healthkitPermissionRequested)
+
         let typesToShare: Set<HKSampleType> = [
             .workoutType(),
             heartRateType
@@ -39,7 +41,7 @@ final class HealthKitManager {
         do {
             try await healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead)
         } catch {
-            // Authorization request failed — app continues without HealthKit
+            ErrorLogger.log(.healthkit, message: error.localizedDescription)
         }
     }
 
@@ -96,6 +98,8 @@ final class HealthKitManager {
             return (nil, "HealthKit not available on this device")
         }
 
+        AnalyticsService.shared.track(.healthkitWorkoutSaveStarted)
+
         let config = HKWorkoutConfiguration()
         config.activityType = .cycling
         config.locationType = .indoor
@@ -127,8 +131,15 @@ final class HealthKitManager {
             try await builder.endCollection(at: endDate)
             let workout = try await builder.finishWorkout()
 
+            AnalyticsService.shared.track(.healthkitWorkoutSaveSucceeded, properties: [
+                "hr_sample_count": AnalyticsProperties.countBucket(hrSamples.count)
+            ])
             return (workout?.uuid, nil)
         } catch {
+            AnalyticsService.shared.track(.healthkitWorkoutSaveFailed, properties: [
+                "error": AnalyticsProperties.sanitizeMessage(error.localizedDescription)
+            ])
+            ErrorLogger.log(.healthkit, message: error.localizedDescription)
             return (nil, error.localizedDescription)
         }
     }

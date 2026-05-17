@@ -22,6 +22,9 @@ final class StravaUploader {
 
     func upload(workout: CompletedWorkout) async {
         state = .uploading
+        AnalyticsService.shared.track(.stravaUploadStarted, properties: [
+            "duration": AnalyticsProperties.durationBucket(workout.duration)
+        ])
 
         do {
             let token = try await auth.validAccessToken()
@@ -30,8 +33,13 @@ final class StravaUploader {
             state = .processing
             let activityId = try await pollUploadStatus(uploadId: uploadId, token: token)
             state = .success(activityId: activityId)
+            AnalyticsService.shared.track(.stravaUploadSucceeded)
         } catch {
             state = .failed(error.localizedDescription)
+            AnalyticsService.shared.track(.stravaUploadFailed, properties: [
+                "error": AnalyticsProperties.sanitizeMessage(error.localizedDescription)
+            ])
+            ErrorLogger.log(.strava, message: error.localizedDescription)
         }
     }
 

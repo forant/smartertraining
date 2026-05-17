@@ -79,6 +79,12 @@ struct RideSessionView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(phase == .finished ? "Done" : "Close") {
+                        if phase == .riding {
+                            AnalyticsService.shared.track(.workoutAbandoned, properties: [
+                                "workout_type": recommendation.type.rawValue,
+                                "elapsed": AnalyticsProperties.durationBucket(runtime?.totalElapsed ?? 0)
+                            ])
+                        }
                         runtime?.finish()
                         manager.disconnect()
                         hrmManager.disconnect()
@@ -266,6 +272,14 @@ struct RideSessionView: View {
         phase = .riding
         runtime?.start()
         healthKit.startHeartRateObservation()
+
+        AnalyticsService.shared.track(.workoutStarted, properties: [
+            "workout_type": recommendation.type.rawValue,
+            "step_count": editor.totalStepCount,
+            "erg_enabled": ergToggle,
+            "is_modified": editor.isModified,
+            "hrm_connected": hrmManager.connectionState.isConnected
+        ])
     }
 
     private var ergToggleSection: some View {
@@ -371,6 +385,15 @@ struct RideSessionView: View {
         phase = .finished
         appState.triggerSync()
 
+        AnalyticsService.shared.track(.workoutCompleted, properties: [
+            "workout_type": recommendation.type.rawValue,
+            "duration": AnalyticsProperties.durationBucket(runtime.totalElapsed),
+            "erg_enabled": ergToggle,
+            "sample_count": AnalyticsProperties.countBucket(runtime.samples.count),
+            "has_hr_data": !(hrValues.isEmpty),
+            "avg_hr": avgHR ?? 0
+        ])
+
         if healthKit.isAvailable {
             savingToHealthKit = true
             Task {
@@ -394,6 +417,13 @@ struct RideSessionView: View {
 
     private func submitFeedbackAndRequestReflection() {
         CoachingNotificationManager.shared.requestPermissionIfNeeded()
+
+        AnalyticsService.shared.track(.postWorkoutFeedbackSubmitted, properties: [
+            "feedback": postFeedback?.rawValue ?? "none",
+            "has_effort": postEffort != nil,
+            "effort_bucket": postEffort.map { AnalyticsProperties.effortBucket($0) } ?? "none",
+            "has_note": !postNote.isEmpty
+        ])
 
         completedWorkout?.workoutFeedback = postFeedback
         completedWorkout?.perceivedEffort = postEffort
@@ -420,6 +450,11 @@ struct RideSessionView: View {
         )
         appState.store.saveIntent(feedbackIntent)
         CoachingNotificationManager.shared.scheduleNotifications(for: feedbackIntent)
+        AnalyticsService.shared.track(.shortTermIntentCreated, properties: [
+            "source": "feedback",
+            "day1_intensity": feedbackIntent.day1RecommendedIntensity.rawValue,
+            "day2_intensity": feedbackIntent.day2RecommendedIntensity.rawValue
+        ])
 
         Task {
             guard var ride = completedWorkout else { return }
@@ -433,6 +468,7 @@ struct RideSessionView: View {
                 steps: editor?.toSteps() ?? [],
                 checkIn: checkIn,
                 memorySummary: memorySummary,
+                upcomingContext: appState.upcomingContextSummary,
                 auth: appState.auth
             )
 

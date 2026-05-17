@@ -1,5 +1,6 @@
 import SwiftUI
 import AuthenticationServices
+import Sentry
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
@@ -9,6 +10,7 @@ struct SettingsView: View {
     @State private var signInError: String?
     @State private var isAuthorizingStrava = false
     @State private var stravaError: String?
+    @State private var showCrashConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -419,6 +421,61 @@ struct SettingsView: View {
                 Button("+ Quality") { appState.debugSeedWorkout(type: .quality) }
             }
             .font(.caption)
+
+            Section("Analytics") {
+                HStack {
+                    Text("Mixpanel")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(AnalyticsConfig.isConfigured ? "Configured" : "Log-only")
+                        .font(.caption)
+                        .foregroundStyle(AnalyticsConfig.isConfigured ? .green : .secondary)
+                }
+
+                HStack {
+                    Text("Environment")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(AnalyticsConfig.environment)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Button("Flush Events") {
+                    AnalyticsService.shared.flush()
+                }
+
+                Button("Send Test Event") {
+                    AnalyticsService.shared.track(.appOpened, properties: [
+                        "test": true
+                    ])
+                }
+            }
+
+            Section("Sentry") {
+                HStack {
+                    Text("Crash reporting")
+                        .font(.subheadline)
+                    Spacer()
+                    Text("Active")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+
+                Button("Send Test Error") {
+                    ErrorLogger.log(.persistence, message: "Debug test error from settings")
+                }
+
+                Button("Test Crash", role: .destructive) {
+                    showCrashConfirmation = true
+                }
+                .alert("This will crash the app", isPresented: $showCrashConfirmation) {
+                    Button("Crash", role: .destructive) { SentrySDK.crash() }
+                    Button("Cancel", role: .cancel) { }
+                } message: {
+                    Text("The crash report will be sent to Sentry on next launch. If running in Xcode, the app will appear frozen — just stop and re-run.")
+                }
+            }
         }
     }
     #endif

@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		0A5F431D2FBA675A008A7358 /* Mixpanel in Frameworks */ = {isa = PBXBuildFile; productRef = 0A5F431C2FBA675A008A7358 /* Mixpanel */; };
+		0A5F43222FBA6D0C008A7358 /* Sentry in Frameworks */ = {isa = PBXBuildFile; productRef = 0A5F43212FBA6D0C008A7358 /* Sentry */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		E518BCE72F916C2800197E0F /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -59,17 +64,27 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0A5F431D2FBA675A008A7358 /* Mixpanel in Frameworks */,
+				0A5F43222FBA6D0C008A7358 /* Sentry in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0A5F431B2FBA675A008A7358 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		E52AC4DE2F8EEC54008BBC95 = {
 			isa = PBXGroup;
 			children = (
 				E52AC4E92F8EEC54008BBC95 /* SmarterTraining */,
 				E518BCE42F916C2700197E0F /* SmarterTrainingTests */,
+				0A5F431B2FBA675A008A7358 /* Frameworks */,
 				E52AC4E82F8EEC54008BBC95 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -116,6 +131,7 @@
 				E52AC4E32F8EEC54008BBC95 /* Sources */,
 				E52AC4E42F8EEC54008BBC95 /* Frameworks */,
 				E52AC4E52F8EEC54008BBC95 /* Resources */,
+				0A5F432D2FBA800E008A7358 /* Run Script */,
 			);
 			buildRules = (
 			);
@@ -126,6 +142,8 @@
 			);
 			name = SmarterTraining;
 			packageProductDependencies = (
+				0A5F431C2FBA675A008A7358 /* Mixpanel */,
+				0A5F43212FBA6D0C008A7358 /* Sentry */,
 			);
 			productName = SmarterTraining;
 			productReference = E52AC4E72F8EEC54008BBC95 /* SmarterTraining.app */;
@@ -159,6 +177,10 @@
 			);
 			mainGroup = E52AC4DE2F8EEC54008BBC95;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				0A5F43112FBA66AA008A7358 /* XCRemoteSwiftPackageReference "mixpanel-swift" */,
+				0A5F43202FBA6D0C008A7358 /* XCRemoteSwiftPackageReference "sentry-cocoa" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E52AC4E82F8EEC54008BBC95 /* Products */;
 			projectDirPath = "";
@@ -186,6 +208,27 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		0A5F432D2FBA800E008A7358 /* Run Script */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Run Script";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$CONFIGURATION\" = \"Release\" ]; then\n  # Copy Sentry dSYM into the archive so Xcode stops warning\n  SENTRY_DSYM=$(find \"${BUILD_DIR}\" -name \"Sentry.framework.dSYM\" -type d 2>/dev/null | head -1)\n  if [ -n \"${SENTRY_DSYM}\" ] && [ -d \"${DWARF_DSYM_FOLDER_PATH}\" ]; then\n    cp -r \"${SENTRY_DSYM}\" \"${DWARF_DSYM_FOLDER_PATH}/\"\n  fi\n\n  # Upload all dSYMs to Sentry\n  export SENTRY_PROPERTIES=\"$SRCROOT/.sentryclirc\"\n  if command -v sentry-cli &> /dev/null; then\n    sentry-cli debug-files upload --include-sources \"$DWARF_DSYM_FOLDER_PATH\"\n  else\n    echo \"warning: sentry-cli not found, skipping dSYM upload\"\n  fi\nfi\n\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		E518BCDF2F916C2700197E0F /* Sources */ = {
@@ -383,7 +426,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmarterTraining/SmarterTraining.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = AM6PVF74CC;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -401,7 +444,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.03;
+				MARKETING_VERSION = 1.04;
 				PRODUCT_BUNDLE_IDENTIFIER = com.timforan.SmarterTraining;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -421,7 +464,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = SmarterTraining/SmarterTraining.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 5;
 				DEVELOPMENT_TEAM = AM6PVF74CC;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -439,7 +482,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.03;
+				MARKETING_VERSION = 1.04;
 				PRODUCT_BUNDLE_IDENTIFIER = com.timforan.SmarterTraining;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -483,6 +526,38 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		0A5F43112FBA66AA008A7358 /* XCRemoteSwiftPackageReference "mixpanel-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mixpanel/mixpanel-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.4.0;
+			};
+		};
+		0A5F43202FBA6D0C008A7358 /* XCRemoteSwiftPackageReference "sentry-cocoa" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/getsentry/sentry-cocoa.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.13.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		0A5F431C2FBA675A008A7358 /* Mixpanel */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0A5F43112FBA66AA008A7358 /* XCRemoteSwiftPackageReference "mixpanel-swift" */;
+			productName = Mixpanel;
+		};
+		0A5F43212FBA6D0C008A7358 /* Sentry */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0A5F43202FBA6D0C008A7358 /* XCRemoteSwiftPackageReference "sentry-cocoa" */;
+			productName = Sentry;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = E52AC4DF2F8EEC54008BBC95 /* Project object */;
 }

@@ -16,6 +16,16 @@ enum TrainingGoal: String, Codable, CaseIterable {
     case consistent = "Stay consistent"
     case healthier = "Increase energy and overall health"
     case bikePerformance = "Support performance on the bike"
+
+    var displayText: String {
+        switch self {
+        case .endurance: "Improve endurance"
+        case .stronger: "Build strength"
+        case .consistent: "Stay consistent"
+        case .healthier: "Feel healthier and more energetic"
+        case .bikePerformance: "Improve cycling performance"
+        }
+    }
 }
 
 enum TypicalAvailability: String, Codable, CaseIterable {
@@ -242,6 +252,8 @@ final class AppState {
     var todayFeedback: WorkoutFeedback?
     private(set) var recentHistory: [WorkoutHistoryEntry] = []
 
+    private(set) var upcomingContextEvents: [UpcomingContextEvent] = []
+
     let store = LocalStore()
     let auth = BackendAuthService()
     private(set) var sync: BackendSyncService!
@@ -267,6 +279,7 @@ final class AppState {
             latestCheckIn = saved
             currentRecommendation = generateRecommendation(for: saved)
         }
+        upcomingContextEvents = store.loadUpcomingContext().filter { !$0.isExpired }
         recentHistory = store.loadWorkouts().suffix(Self.maxHistoryCount)
         if let last = recentHistory.last,
            Calendar.current.isDateInToday(last.date) {
@@ -315,12 +328,52 @@ final class AppState {
             recentHistory[lastIndex].feedbackAt = Date()
             store.saveWorkouts(Array(recentHistory))
         }
+        AnalyticsService.shared.track(.workoutFeedbackSubmitted, properties: [
+            "feedback": feedback.rawValue
+        ])
         triggerSync()
     }
 
     func triggerSync() {
         guard auth.isSignedIn else { return }
         Task { await sync.sync() }
+    }
+
+    // MARK: - Upcoming Context
+
+    var upcomingContextSummary: UpcomingContextSummary {
+        UpcomingContextSummary.build(from: upcomingContextEvents)
+    }
+
+    func addUpcomingContext(_ event: UpcomingContextEvent) {
+        upcomingContextEvents.append(event)
+        store.saveUpcomingContext(upcomingContextEvents)
+        refreshRecommendationIfCheckedIn()
+        triggerSync()
+    }
+
+    func updateUpcomingContext(_ event: UpcomingContextEvent) {
+        if let index = upcomingContextEvents.firstIndex(where: { $0.id == event.id }) {
+            var updated = event
+            updated.updatedAt = Date()
+            upcomingContextEvents[index] = updated
+            store.saveUpcomingContext(upcomingContextEvents)
+            refreshRecommendationIfCheckedIn()
+            triggerSync()
+        }
+    }
+
+    func deleteUpcomingContext(id: UUID) {
+        upcomingContextEvents.removeAll { $0.id == id }
+        store.saveUpcomingContext(upcomingContextEvents)
+        refreshRecommendationIfCheckedIn()
+        triggerSync()
+    }
+
+    private func refreshRecommendationIfCheckedIn() {
+        if let checkIn = latestCheckIn, hasCheckedInToday {
+            currentRecommendation = generateRecommendation(for: checkIn)
+        }
     }
 
     #if DEBUG
@@ -402,9 +455,20 @@ final class AppState {
             checkIn: checkIn,
             recentHistory: recentHistory,
             memorySummary: buildMemorySummary(),
-            activeIntent: store.activeIntent()
+            activeIntent: store.activeIntent(),
+            upcomingContext: upcomingContextSummary
         )
-        return engine.recommend(for: inputs)
+        let result = engine.recommend(for: inputs)
+
+        AnalyticsService.shared.track(.recommendationGenerated, properties: [
+            "type": result.type.rawValue,
+            "step_count": result.steps.count,
+            "has_extras": !result.optionalExtras.isEmpty,
+            "history_count": AnalyticsProperties.countBucket(recentHistory.count),
+            "has_intent": inputs.activeIntent != nil
+        ])
+
+        return result
     }
 }
 

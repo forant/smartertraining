@@ -33,6 +33,7 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
         centralManager.scanForPeripherals(withServices: [FTMS.serviceUUID], options: [
             CBCentralManagerScanOptionAllowDuplicatesKey: false
         ])
+        AnalyticsService.shared.track(.trainerScanStarted)
     }
 
     func stopScanning() {
@@ -48,6 +49,7 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
         connectedPeripheral = device.peripheral
         device.peripheral.delegate = self
         centralManager.connect(device.peripheral, options: nil)
+        AnalyticsService.shared.track(.trainerConnectAttempted)
     }
 
     func disconnect() {
@@ -66,6 +68,9 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
         let peripherals = centralManager.retrievePeripherals(withIdentifiers: [identifier])
         guard let peripheral = peripherals.first else {
             connectionState = .disconnected
+            AnalyticsService.shared.track(.trainerReconnectFailed, properties: [
+                "reason": "peripheral_not_found"
+            ])
             return
         }
 
@@ -75,6 +80,7 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
         peripheral.delegate = self
         centralManager.connect(peripheral, options: nil)
         startReconnectTimer()
+        AnalyticsService.shared.track(.trainerReconnectAttempted)
     }
 
     private func startReconnectTimer() {
@@ -92,6 +98,9 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
                     self.centralManager.cancelPeripheralConnection(peripheral)
                 }
                 self.cleanUpConnection()
+                AnalyticsService.shared.track(.trainerReconnectFailed, properties: [
+                    "reason": "timeout"
+                ])
             }
         }
     }
@@ -157,6 +166,7 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
                 name: name,
                 peripheral: peripheral
             ))
+            AnalyticsService.shared.track(.trainerFound)
         }
     }
 
@@ -176,6 +186,10 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
         #endif
         connectionState = .error("Connection failed: \(error?.localizedDescription ?? "unknown")")
         cleanUpConnection()
+        AnalyticsService.shared.track(.trainerConnectionFailed, properties: [
+            "error": AnalyticsProperties.sanitizeMessage(error?.localizedDescription ?? "unknown")
+        ])
+        ErrorLogger.bluetooth(message: error?.localizedDescription ?? "Connection failed")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: (any Error)?) {
@@ -186,6 +200,9 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
         cleanUpConnection()
         if wasConnected {
             connectionState = .error("Trainer disconnected")
+            AnalyticsService.shared.track(.trainerDisconnected, properties: [
+                "had_error": error != nil
+            ])
         }
     }
 
@@ -270,6 +287,11 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
             displayName: deviceName,
             lastConnectedAt: Date()
         )
+
+        AnalyticsService.shared.track(.trainerConnected, properties: [
+            "supports_erg": supportsERG,
+            "has_control_point": hasControlPoint
+        ])
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: (any Error)?) {

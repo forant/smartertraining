@@ -13,6 +13,7 @@ final class AICoachService {
 
     private(set) var explanation: AICoachExplanation?
     private(set) var isLoading = false
+    private(set) var hasAttemptedFetch = false
 
     private var cachedHash: Int?
 
@@ -22,22 +23,32 @@ final class AICoachService {
         memorySummary: TrainingMemorySummary,
         lastFeedback: WorkoutFeedback?,
         editedWorkout: Bool,
+        upcomingContext: UpcomingContextSummary = .empty,
         auth: BackendAuthService
     ) async {
         let hash = computeHash(recommendation: recommendation, checkIn: checkIn)
         if hash == cachedHash && explanation != nil { return }
 
-        guard auth.isSignedIn, let jwt = auth.jwt else { return }
+        guard auth.isSignedIn, let jwt = auth.jwt else {
+            hasAttemptedFetch = true
+            return
+        }
 
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            hasAttemptedFetch = true
+        }
+
+        AnalyticsService.shared.track(.aiCoachExplanationRequested)
 
         let body = buildRequestBody(
             recommendation: recommendation,
             checkIn: checkIn,
             memorySummary: memorySummary,
             lastFeedback: lastFeedback,
-            editedWorkout: editedWorkout
+            editedWorkout: editedWorkout,
+            upcomingContext: upcomingContext
         )
 
         do {
@@ -52,7 +63,12 @@ final class AICoachService {
             let (data, response) = try await URLSession.shared.data(for: request)
 
             guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200 else { return }
+                  httpResponse.statusCode == 200 else {
+                AnalyticsService.shared.track(.aiCoachExplanationFailed, properties: [
+                    "reason": "non_200_response"
+                ])
+                return
+            }
 
             let decoder = JSONDecoder()
             decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -60,14 +76,22 @@ final class AICoachService {
 
             explanation = result
             cachedHash = hash
+
+            AnalyticsService.shared.track(.aiCoachExplanationSucceeded, properties: [
+                "is_fallback": result.isFallback
+            ])
         } catch {
-            // Deterministic reason remains visible
+            AnalyticsService.shared.track(.aiCoachExplanationFailed, properties: [
+                "error": AnalyticsProperties.sanitizeMessage(error.localizedDescription)
+            ])
+            ErrorLogger.log(.aiCoach, message: error.localizedDescription)
         }
     }
 
     func invalidateCache() {
         cachedHash = nil
         explanation = nil
+        hasAttemptedFetch = false
     }
 
     // MARK: - Private
@@ -88,7 +112,8 @@ final class AICoachService {
         checkIn: CheckIn?,
         memorySummary: TrainingMemorySummary,
         lastFeedback: WorkoutFeedback?,
-        editedWorkout: Bool
+        editedWorkout: Bool,
+        upcomingContext: UpcomingContextSummary
     ) -> [String: Any] {
         var body: [String: Any] = [
             "recommendation": [
@@ -140,6 +165,19 @@ final class AICoachService {
 
         if let fb = lastFeedback {
             body["last_feedback"] = fb.rawValue
+        }
+
+        if !upcomingContext.isEmpty {
+            body["upcoming_context"] = upcomingContext.events.map { event -> [String: Any] in
+                var dict: [String: Any] = [
+                    "type": event.type.rawValue,
+                    "days_until": event.daysFromNow,
+                    "impact": event.impact.rawValue
+                ]
+                if let dur = event.duration { dict["duration"] = dur.rawValue }
+                if let note = event.note { dict["note"] = String(note.prefix(200)) }
+                return dict
+            }
         }
 
         return body

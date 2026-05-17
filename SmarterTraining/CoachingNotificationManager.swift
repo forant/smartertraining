@@ -16,7 +16,12 @@ final class CoachingNotificationManager {
     func requestPermissionIfNeeded() {
         center.getNotificationSettings { settings in
             guard settings.authorizationStatus == .notDetermined else { return }
-            self.center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+            AnalyticsService.shared.track(.notificationPermissionRequested)
+            self.center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+                AnalyticsService.shared.track(
+                    granted ? .notificationPermissionGranted : .notificationPermissionDenied
+                )
+            }
         }
     }
 
@@ -37,6 +42,11 @@ final class CoachingNotificationManager {
         cancelExistingCoachingNotifications()
 
         guard !intent.isExpired else { return }
+
+        AnalyticsService.shared.track(.coachingNotificationScheduled, properties: [
+            "day1_intensity": intent.day1RecommendedIntensity.rawValue,
+            "day2_intensity": intent.day2RecommendedIntensity.rawValue
+        ])
 
         let day1Fire = intent.day1Date.addingTimeInterval(-2 * 3600)
         let day2Fire = intent.day2Date.addingTimeInterval(-2 * 3600)

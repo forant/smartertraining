@@ -23,9 +23,11 @@ final class TrainerWorkoutRuntime {
     var ergEnabled: Bool = false {
         didSet {
             if ergEnabled && state == .running {
+                AnalyticsService.shared.track(.ergEnabled)
                 attemptERGIfEnabled()
                 trySendERGTarget(force: true)
             } else if !ergEnabled {
+                AnalyticsService.shared.track(.ergDisabled)
                 if ergState == .active {
                     trainerManager?.send(.stop)
                 }
@@ -223,6 +225,22 @@ final class TrainerWorkoutRuntime {
         print("[ERG] \(ergState.label) \u{2192} \(newState.label)")
         #endif
         ergState = newState
+
+        switch newState {
+        case .active:
+            AnalyticsService.shared.track(.ergControlAcquired)
+        case .failed(let msg):
+            AnalyticsService.shared.track(.ergControlFailed, properties: [
+                "reason": AnalyticsProperties.sanitizeMessage(msg)
+            ])
+            ErrorLogger.erg(message: msg,
+                            controlPointAvailable: trainerManager?.hasControlPoint,
+                            controlAcquired: trainerManager?.controlAcquired)
+        case .unsupported:
+            AnalyticsService.shared.track(.ergFallbackToGuided)
+        default:
+            break
+        }
     }
 
     // MARK: - Timer

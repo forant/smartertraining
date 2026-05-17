@@ -55,6 +55,11 @@ struct CheckInView: View {
                     }
                 }
             }
+            .onAppear {
+                AnalyticsService.shared.track(.checkinStarted, properties: [
+                    "context": context == .updatingTodayPlan ? "update" : context == .returningAfterAbsence ? "return" : "regular"
+                ])
+            }
         }
     }
 
@@ -313,6 +318,17 @@ struct CheckInView: View {
             recentActivities: activities
         )
         appState.submit(checkIn: checkIn)
+
+        AnalyticsService.shared.track(.checkinCompleted, properties: [
+            "context": context == .updatingTodayPlan ? "update" : context == .returningAfterAbsence ? "return" : "regular",
+            "feel": overallFeel,
+            "legs": legs,
+            "motivation": motivation,
+            "time_bucket": AnalyticsProperties.timeBucket(timeAvailable),
+            "activity_count": activities.count,
+            "context_flag_count": selectedContextFlags.count
+        ])
+
         if context == .updatingTodayPlan { dismiss() }
     }
 

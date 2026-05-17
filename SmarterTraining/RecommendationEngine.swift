@@ -10,6 +10,7 @@ struct RecommendationEngine {
         var recentHistory: [WorkoutHistoryEntry]
         var memorySummary: TrainingMemorySummary = .empty
         var activeIntent: ShortTermTrainingIntent? = nil
+        var upcomingContext: UpcomingContextSummary = .empty
     }
 
     func recommend(for inputs: Inputs) -> WorkoutRecommendation {
@@ -125,6 +126,30 @@ struct RecommendationEngine {
             return .endurance
         }
 
+        // Step A4: Upcoming context
+        let upcoming = inputs.upcomingContext
+
+        if upcoming.hasBigRideSoon, let days = upcoming.daysUntilBigRide, days <= 1 {
+            if checkIn.overallFeel == "Great" && checkIn.legs == "Fresh" {
+                return .endurance
+            }
+            return .recovery
+        }
+
+        if upcoming.recoveryFocusedActive {
+            if checkIn.legs == "Heavy" || checkIn.overallFeel != "Great" {
+                return .recovery
+            }
+            return .endurance
+        }
+
+        if upcoming.hasTravelSoon, let days = upcoming.daysUntilTravel, days <= 1 {
+            if checkIn.legs == "Heavy" || checkIn.overallFeel != "Great" {
+                return .recovery
+            }
+            return .endurance
+        }
+
         // Step B: Prior feedback — tooMuch is a strong signal
         if lastFeedback == .tooMuch {
             if checkIn.overallFeel == "Okay" || checkIn.legs == "Heavy" || checkIn.motivation == "Low" {
@@ -160,12 +185,16 @@ struct RecommendationEngine {
             && legsReady
         let easyBoost = lastFeedback == .easy
 
-        let qualityHistoryThreshold = willingness >= 1 ? 1 : 2
+        let pushHarderBoost = upcoming.wantsToPushHarder && checkIn.legs != "Heavy" && actStress == 0
+        let qualityHistoryThreshold = (willingness >= 1 || pushHarderBoost) ? 1 : 2
 
         let weekLoadHigh = memory.hasHighRecentLoad
             || (memory.hardDayCount7d >= 2 && memory.recentLifeStressLevel >= 2)
 
-        if !weekLoadHigh && easierCount >= qualityHistoryThreshold && signalsStrong && !hardBias && willingness > -2 && actStress < 2 {
+        let upcomingBlocksQuality = (upcoming.hasBigRideSoon && (upcoming.daysUntilBigRide ?? 99) <= 1)
+            || upcoming.recoveryFocusedActive
+
+        if !upcomingBlocksQuality && !weekLoadHigh && easierCount >= qualityHistoryThreshold && signalsStrong && !hardBias && willingness > -2 && actStress < 2 {
             return .quality
         }
 
@@ -175,7 +204,7 @@ struct RecommendationEngine {
         }
 
         // Fresh legs + good signals can open quality
-        if !weekLoadHigh && checkIn.legs == "Fresh"
+        if !upcomingBlocksQuality && !weekLoadHigh && checkIn.legs == "Fresh"
             && checkIn.overallFeel == "Great"
             && checkIn.motivation == "High"
             && lastType != .quality
@@ -186,7 +215,7 @@ struct RecommendationEngine {
         }
 
         // Easy boost
-        if !weekLoadHigh && easyBoost
+        if !upcomingBlocksQuality && !weekLoadHigh && easyBoost
             && signalsStrong
             && easierCount >= 1
             && lastType != .quality
@@ -253,6 +282,12 @@ struct RecommendationEngine {
         let historyCount = inputs.recentHistory.count
         let actStress = activityStress(from: checkIn)
         let memory = inputs.memorySummary
+
+        let upcoming = inputs.upcomingContext
+
+        if let reason = buildUpcomingContextReason(type: type, upcoming: upcoming, checkIn: checkIn) {
+            return reason
+        }
 
         switch type {
         case .recovery:
@@ -597,6 +632,69 @@ struct RecommendationEngine {
         }
 
         return extras
+    }
+
+    // MARK: - Upcoming Context Reasons
+
+    private func buildUpcomingContextReason(type: WorkoutType, upcoming: UpcomingContextSummary, checkIn: CheckIn) -> String? {
+        guard !upcoming.isEmpty else { return nil }
+
+        if upcoming.hasBigRideSoon, let days = upcoming.daysUntilBigRide {
+            let label = upcoming.bigRideLabel ?? "big ride"
+            if days <= 1 {
+                switch type {
+                case .recovery:
+                    return "Keeping today easy so you're fresher for tomorrow's \(label)."
+                case .endurance:
+                    return "Controlled endurance today to stay fresh for tomorrow's \(label)."
+                case .quality:
+                    return nil
+                }
+            }
+            if days <= 3 && type == .quality {
+                return "Today can carry some structured work because your \(label) is still a couple days out."
+            }
+        }
+
+        if upcoming.recoveryFocusedActive {
+            switch type {
+            case .recovery:
+                return "You flagged this as a recovery-focused period. Keeping things easy and intentional."
+            case .endurance:
+                return "Recovery-focused period, so today stays aerobic. Easy work is still forward progress."
+            case .quality:
+                return nil
+            }
+        }
+
+        if upcoming.hasTravelSoon, let days = upcoming.daysUntilTravel, days <= 1 {
+            switch type {
+            case .recovery:
+                return "With travel coming up, keeping today easy and low-friction."
+            case .endurance:
+                return "Travel is coming up, so today stays simple and controlled."
+            case .quality:
+                return nil
+            }
+        }
+
+        if upcoming.hasBusyDaySoon, let days = upcoming.daysUntilBusyDay {
+            if days == 0 && type != .quality {
+                return "Today looks compressed, so we'll keep this efficient."
+            }
+            if days == 1 && type == .quality {
+                return "Since tomorrow looks tight, today is a good chance to get focused work in\u{2014}without overdoing it."
+            }
+            if days == 1 && type == .endurance {
+                return "Since tomorrow looks tight, today is a good chance to get useful work in\u{2014}without overdoing it."
+            }
+        }
+
+        if upcoming.wantsToPushHarder && type == .quality {
+            return "You flagged wanting to push harder, and today's signals support it. Controlled intensity with purpose."
+        }
+
+        return nil
     }
 
     // MARK: - Helpers

@@ -16,6 +16,9 @@ xcuserdata/
 DerivedData/
 .build/
 
+# Sentry
+.sentryclirc
+
 # Misc
 *.log
 

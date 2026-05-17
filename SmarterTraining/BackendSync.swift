@@ -32,6 +32,9 @@ final class BackendSyncService {
         status = .syncing
 
         let pending = store.pendingSyncRecords()
+        AnalyticsService.shared.track(.syncStarted, properties: [
+            "pending_count": pending.count
+        ])
 
         do {
             let response = try await performSync(jwt: jwt, records: pending, since: lastSyncedAt)
@@ -49,12 +52,22 @@ final class BackendSyncService {
             defaults.set(now, forKey: Self.lastSyncKey)
             status = .synced(now)
 
+            AnalyticsService.shared.track(.syncSucceeded, properties: [
+                "synced_count": pending.count,
+                "received_count": response.records.count
+            ])
+
         } catch {
             let reason = error.localizedDescription
             for record in pending {
                 store.markSyncFailed(recordType: record.recordType, recordId: record.recordId, reason: reason)
             }
             status = .error(reason)
+
+            AnalyticsService.shared.track(.syncFailed, properties: [
+                "error": AnalyticsProperties.sanitizeMessage(reason)
+            ])
+            ErrorLogger.log(.backendSync, message: reason)
         }
     }
 

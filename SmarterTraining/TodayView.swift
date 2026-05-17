@@ -7,39 +7,55 @@ struct TodayView: View {
     @State private var showingRideSession = false
     @State private var showingEditor = false
     @State private var showingSettings = false
+    @State private var showingUpcomingContextAdd = false
+    @State private var editingUpcomingContextEvent: UpcomingContextEvent?
     @State private var editor: WorkoutEditor?
     @State private var aiCoach = AICoachService()
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: 16) {
                     header
+
                     WorkoutHeroCard(
                         recommendation: appState.currentRecommendation,
                         isModified: editor?.isModified == true,
                         onEdit: hasCyclingSteps ? {
                             ensureEditor()
                             showingEditor = true
+                            AnalyticsService.shared.track(.workoutEditorOpened)
                         } : nil
                     )
+                    .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.type)
+                    .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.title)
+
                     startWorkoutButton
+
                     coachCallout
-
-                    if !appState.currentRecommendation.optionalExtras.isEmpty {
-                        OptionalExtrasCard(extras: appState.currentRecommendation.optionalExtras)
-                    }
-
-                    if let checkIn = appState.latestCheckIn {
-                        CheckInSummaryCard(checkIn: checkIn)
-                    }
+                        .animation(.easeInOut(duration: 0.3), value: coachExplanationText)
 
                     WorkoutFeedbackCard(
                         selectedFeedback: appState.todayFeedback,
                         onSelect: { appState.submitFeedback($0) }
                     )
 
-                    actionButtons
+                    UpcomingContextCard(
+                        onAdd: { showingUpcomingContextAdd = true },
+                        onEdit: { editingUpcomingContextEvent = $0 }
+                    )
+
+                    if !appState.currentRecommendation.optionalExtras.isEmpty {
+                        OptionalExtrasCard(extras: appState.currentRecommendation.optionalExtras)
+                    }
+
+                    if let checkIn = appState.latestCheckIn {
+                        CheckInSummaryCard(checkIn: checkIn) {
+                            showingCheckIn = true
+                        }
+                    }
+
+                    historyButton
                 }
                 .padding()
             }
@@ -67,6 +83,12 @@ struct TodayView: View {
                 if let editor {
                     WorkoutEditorView(editor: editor)
                 }
+            }
+            .sheet(isPresented: $showingUpcomingContextAdd) {
+                UpcomingContextSheet()
+            }
+            .sheet(item: $editingUpcomingContextEvent) { event in
+                UpcomingContextSheet(editingEvent: event)
             }
             .fullScreenCover(isPresented: $showingRideSession) {
                 RideSessionView(
@@ -107,6 +129,10 @@ struct TodayView: View {
 
     // MARK: - Coach Callout
 
+    private var isAwaitingAI: Bool {
+        aiCoach.isLoading || (!aiCoach.hasAttemptedFetch && appState.auth.isSignedIn)
+    }
+
     private var coachExplanationText: String {
         if let ai = aiCoach.explanation, !ai.isFallback {
             return ai.coachExplanation
@@ -115,47 +141,38 @@ struct TodayView: View {
     }
 
     private var coachCallout: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "brain.head.profile")
-                    .font(.title3)
-                    .foregroundStyle(.tint)
-                    .frame(width: 32)
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "brain.head.profile")
+                .font(.subheadline)
+                .foregroundStyle(.tint)
+                .frame(width: 22)
 
-                VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 4) {
+                if isAwaitingAI {
+                    Text("Thinking about today\u{2026}")
+                        .font(.subheadline)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
                     Text(coachExplanationText)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
 
-                    if aiCoach.isLoading {
-                        Text("Thinking through your week\u{2026}")
+                    if let ai = aiCoach.explanation, !ai.isFallback, let tomorrow = ai.tomorrowImplication {
+                        Text(tomorrow)
                             .font(.caption)
                             .foregroundStyle(.tertiary)
+                            .italic()
                     }
-                }
-            }
-
-            if let ai = aiCoach.explanation, !ai.isFallback {
-                if let note = ai.continuityNote {
-                    Text(note)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .padding(.leading, 44)
-                }
-                if let tomorrow = ai.tomorrowImplication {
-                    Text(tomorrow)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .italic()
-                        .padding(.leading, 44)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
         .background(Color.accentColor.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func fetchAIExplanation() async {
@@ -169,6 +186,7 @@ struct TodayView: View {
             memorySummary: summary,
             lastFeedback: appState.todayFeedback,
             editedWorkout: editor?.isModified == true,
+            upcomingContext: appState.upcomingContextSummary,
             auth: appState.auth
         )
     }
@@ -176,13 +194,16 @@ struct TodayView: View {
     // MARK: - Start Workout
 
     private var hasCyclingSteps: Bool {
-        appState.currentRecommendation.steps.contains { $0.modality == .cycling }
+        appState.currentRecommendation.steps.contains { $0.modality == .cycling || $0.modality == .recovery }
     }
 
     @ViewBuilder
     private var startWorkoutButton: some View {
         if hasCyclingSteps {
             Button {
+                AnalyticsService.shared.track(.workoutStartTapped, properties: [
+                    "workout_type": appState.currentRecommendation.type.rawValue
+                ])
                 showingRideSession = true
             } label: {
                 Label("Start Workout", systemImage: "figure.indoor.cycle")
@@ -212,31 +233,17 @@ struct TodayView: View {
         )
     }
 
-    // MARK: - Action Buttons
+    // MARK: - History Button
 
-    private var actionButtons: some View {
-        VStack(spacing: 12) {
-            Button {
-                showingCheckIn = true
-            } label: {
-                Label("Update today's plan", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-
-            Button {
-                showingHistory = true
-            } label: {
-                Label("History", systemImage: "clock")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .tint(.secondary)
+    private var historyButton: some View {
+        Button {
+            showingHistory = true
+        } label: {
+            Text("View history")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
+        .buttonStyle(.plain)
         .padding(.top, 4)
     }
 
@@ -337,26 +344,28 @@ struct OptionalExtrasCard: View {
     let extras: [String]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Also consider")
-                .font(.subheadline)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Also helpful today")
+                .font(.caption)
                 .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
 
             ForEach(extras, id: \.self) { extra in
-                HStack(spacing: 10) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.subheadline)
+                HStack(spacing: 6) {
+                    Image(systemName: "plus")
+                        .font(.caption2)
                         .foregroundStyle(.tertiary)
                     Text(extra)
-                        .font(.subheadline)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
 
@@ -364,55 +373,46 @@ struct OptionalExtrasCard: View {
 
 struct CheckInSummaryCard: View {
     let checkIn: CheckIn
+    let onTap: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Label("Your check-in", systemImage: "checkmark.circle.fill")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Text("Today's check-in")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.tertiary)
 
-            HStack(spacing: 0) {
-                summaryItem("Feel", value: checkIn.overallFeel)
-                summaryItem("Legs", value: checkIn.legs)
-                summaryItem("Motivation", value: checkIn.motivation)
-                summaryItem("Time", value: "\(checkIn.timeAvailable) min")
-            }
+                    Spacer()
 
-            if !checkIn.recentActivities.isEmpty {
-                let summary = checkIn.recentActivities.map { a in
-                    var parts = [a.type]
-                    if let t = a.timing { parts.append(t.lowercased()) }
-                    if let i = a.intensity { parts.append(i.lowercased()) }
-                    return parts.joined(separator: " \u{00B7} ")
-                }.joined(separator: ", ")
-                Text(summary)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(.quaternary)
+                }
 
-            if !checkIn.contextFlags.isEmpty {
-                Text(checkIn.contextFlags.joined(separator: " \u{00B7} "))
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 6) {
+                    Text("\(checkIn.overallFeel) \u{00B7} \(checkIn.legs) legs \u{00B7} \(checkIn.motivation) motivation \u{00B7} \(checkIn.timeAvailable) min")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary.opacity(0.7))
+                }
+
+                if !checkIn.contextFlags.isEmpty {
+                    Text(checkIn.contextFlags.joined(separator: " \u{00B7} "))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func summaryItem(_ label: String, value: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value)
-                .font(.subheadline)
-                .fontWeight(.medium)
-            Text(label)
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity)
+        .buttonStyle(.plain)
+        .accessibilityLabel("Today's check-in: \(checkIn.overallFeel) feeling, \(checkIn.legs) legs, \(checkIn.motivation) motivation, \(checkIn.timeAvailable) minutes")
+        .accessibilityHint("Tap to update your check-in")
     }
 }
 
@@ -469,21 +469,27 @@ struct WorkoutFeedbackCard: View {
 struct HistoryView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    @State private var rides: [CompletedWorkout] = []
 
     var body: some View {
         NavigationStack {
             Group {
                 if appState.recentHistory.isEmpty {
                     ContentUnavailableView(
-                        "No recent workouts yet",
+                        "No workouts yet",
                         systemImage: "clock",
-                        description: Text("Your recent plans will show up here.")
+                        description: Text("Your training story will build here.")
                     )
                 } else {
-                    List(appState.recentHistory.reversed().indices, id: \.self) { index in
-                        let entry = appState.recentHistory.reversed()[index]
-                        HistoryRowView(entry: entry)
+                    List {
+                        ForEach(appState.recentHistory.reversed()) { entry in
+                            NavigationLink {
+                                WorkoutDetailView(entry: entry, ride: rideForEntry(entry))
+                            } label: {
+                                HistoryRowView(entry: entry)
+                            }
                             .listRowSeparator(.hidden)
+                        }
                     }
                     .listStyle(.plain)
                 }
@@ -495,23 +501,42 @@ struct HistoryView: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .task { rides = appState.store.finishedRides() }
         }
+    }
+
+    private func rideForEntry(_ entry: WorkoutHistoryEntry) -> CompletedWorkout? {
+        rides.first { Calendar.current.isDate($0.startDate, inSameDayAs: entry.date) }
     }
 }
 
 struct HistoryRowView: View {
     let entry: WorkoutHistoryEntry
 
+    private var isCompleted: Bool { entry.feedback != nil }
+
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
+            Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
+                .font(.caption)
+                .foregroundStyle(isCompleted ? Color.green : Color(.quaternaryLabel))
+
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.title)
                     .font(.subheadline)
-                    .fontWeight(.medium)
+                    .fontWeight(isCompleted ? .medium : .regular)
+                    .foregroundStyle(isCompleted ? .primary : .secondary)
 
-                Text(entry.type.label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    Text(entry.type.label)
+                        .font(.caption)
+                        .foregroundStyle(isCompleted ? .secondary : .tertiary)
+
+                    if let feedback = entry.feedback {
+                        Text(feedback.emoji)
+                            .font(.caption2)
+                    }
+                }
             }
 
             Spacer()

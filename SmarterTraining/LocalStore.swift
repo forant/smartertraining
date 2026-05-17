@@ -99,6 +99,23 @@ final class LocalStore {
         return nil
     }
 
+    // MARK: - Upcoming Context
+
+    private var upcomingContextURL: URL {
+        baseURL.appendingPathComponent("upcoming_context.json")
+    }
+
+    func loadUpcomingContext() -> [UpcomingContextEvent] {
+        guard let data = try? Data(contentsOf: upcomingContextURL) else { return [] }
+        return (try? decoder.decode([UpcomingContextEvent].self, from: data)) ?? []
+    }
+
+    func saveUpcomingContext(_ events: [UpcomingContextEvent]) {
+        let cleaned = events.filter { $0.daysFromNow >= -14 }
+        guard let data = try? encoder.encode(cleaned) else { return }
+        try? data.write(to: upcomingContextURL, options: .atomic)
+    }
+
     // MARK: - Sync Support
 
     private var syncStatusURL: URL {
@@ -133,6 +150,20 @@ final class LocalStore {
                         recordType: "ride",
                         recordId: ride.id,
                         updatedAt: recordUpdatedAt,
+                        payload: data
+                    ))
+                }
+            }
+        }
+
+        for event in loadUpcomingContext() {
+            let key = syncKey(recordType: "upcoming_context", recordId: event.id)
+            if needsSync(key: key, recordUpdatedAt: event.updatedAt, metadata: metadata) {
+                if let data = try? encoder.encode(event) {
+                    records.append(SyncRecordEnvelope(
+                        recordType: "upcoming_context",
+                        recordId: event.id,
+                        updatedAt: event.updatedAt,
                         payload: data
                     ))
                 }
@@ -198,6 +229,17 @@ final class LocalStore {
             if let ride = try? decoder.decode(CompletedWorkout.self, from: envelope.payload) {
                 saveRide(ride)
                 markSynced(recordType: "ride", recordId: ride.id, serverUpdatedAt: envelope.updatedAt)
+            }
+        case "upcoming_context":
+            if let event = try? decoder.decode(UpcomingContextEvent.self, from: envelope.payload) {
+                var events = loadUpcomingContext()
+                if let index = events.firstIndex(where: { $0.id == event.id }) {
+                    events[index] = event
+                } else {
+                    events.append(event)
+                }
+                saveUpcomingContext(events)
+                markSynced(recordType: "upcoming_context", recordId: event.id, serverUpdatedAt: envelope.updatedAt)
             }
         default:
             break

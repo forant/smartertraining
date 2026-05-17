@@ -14,7 +14,7 @@ struct OnboardingFlowView: View {
     @State private var ftpText = ""
     @FocusState private var nameFieldFocused: Bool
 
-    private let totalSteps = 8
+    private let totalSteps = 9
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,31 +35,32 @@ struct OnboardingFlowView: View {
             .padding(.horizontal, 12)
             .frame(height: 36)
             .overlay {
-                if step > 0 {
-                    ProgressView(value: Double(step), total: Double(totalSteps - 1))
+                if step >= 2 {
+                    ProgressView(value: Double(step - 1), total: Double(totalSteps - 2))
                         .tint(.accentColor)
                         .padding(.horizontal, 56)
                 }
             }
 
             TabView(selection: $step) {
-                welcomeScreen.tag(0)
-                nameScreen.tag(1)
-                stateScreen.tag(2)
-                goalsScreen.tag(3)
-                availabilityScreen.tag(4)
-                frequencyScreen.tag(5)
-                equipmentScreen.tag(6)
-                ftpScreen.tag(7)
+                introScreen.tag(0)
+                howItWorksScreen.tag(1)
+                nameScreen.tag(2)
+                stateScreen.tag(3)
+                goalsScreen.tag(4)
+                availabilityScreen.tag(5)
+                frequencyScreen.tag(6)
+                equipmentScreen.tag(7)
+                ftpScreen.tag(8)
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.easeInOut(duration: 0.3), value: step)
         }
     }
 
-    // MARK: - Screens
+    // MARK: - Intro Screens
 
-    private var welcomeScreen: some View {
+    private var introScreen: some View {
         VStack(spacing: 32) {
             Spacer()
 
@@ -69,18 +70,21 @@ struct OnboardingFlowView: View {
                 .frame(width: 100, height: 100)
                 .clipShape(RoundedRectangle(cornerRadius: 22))
 
-            VStack(spacing: 8) {
-                Text("Welcome")
-                    .font(.largeTitle)
+            VStack(spacing: 12) {
+                Text("Training for people\nwith real lives")
+                    .font(.title)
                     .fontWeight(.bold)
+                    .multilineTextAlignment(.center)
 
-                Text("Let's get you set up in under a minute")
+                Text("Adaptive workouts that adjust around your schedule, fatigue, motivation, and recovery.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
             }
 
             Button {
+                AnalyticsService.shared.track(.onboardingIntroViewed)
                 advance()
             } label: {
                 Text("Get started")
@@ -96,6 +100,78 @@ struct OnboardingFlowView: View {
         }
         .padding(.horizontal, 24)
     }
+
+    private var howItWorksScreen: some View {
+        VStack(spacing: 32) {
+            Spacer()
+
+            Text("How SmarterTraining works")
+                .font(.title2)
+                .fontWeight(.bold)
+                .multilineTextAlignment(.center)
+
+            VStack(alignment: .leading, spacing: 24) {
+                howItWorksStep(
+                    number: 1,
+                    title: "Check in",
+                    description: "Tell the coach how you're feeling, how much time you have, and what life looks like today."
+                )
+                howItWorksStep(
+                    number: 2,
+                    title: "Get today's recommendation",
+                    description: "Your workout adapts around fatigue, recovery, consistency, and upcoming events."
+                )
+                howItWorksStep(
+                    number: 3,
+                    title: "Train without overthinking",
+                    description: "Ride indoors with smart trainer control or take the workout outside."
+                )
+            }
+
+            Text("Built for consistency, not perfection.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            Button {
+                AnalyticsService.shared.track(.onboardingHowItWorksViewed)
+                AnalyticsService.shared.track(.onboardingStarted)
+                advance()
+            } label: {
+                Text("Personalize my training")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+
+            Spacer()
+        }
+        .padding(.horizontal, 24)
+    }
+
+    private func howItWorksStep(number: Int, title: String, description: String) -> some View {
+        HStack(alignment: .top, spacing: 16) {
+            Text("\(number)")
+                .font(.headline)
+                .fontWeight(.bold)
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(Color.accentColor)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text(description)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Personalization Screens
 
     private var nameScreen: some View {
         OnboardingCard(question: "What should we call you?") {
@@ -146,7 +222,7 @@ struct OnboardingFlowView: View {
                 OptionGrid(columns: 1) {
                     ForEach(TrainingGoal.allCases, id: \.self) { goal in
                         OnboardingPill(
-                            label: goal.rawValue,
+                            label: goal.displayText,
                             isSelected: goals.contains(goal)
                         ) {
                             if goals.contains(goal) {
@@ -206,7 +282,7 @@ struct OnboardingFlowView: View {
     }
 
     private var equipmentScreen: some View {
-        OnboardingCard(question: "What exercise equipment do you have access to?") {
+        OnboardingCard(question: "What equipment do you regularly use?") {
             VStack(spacing: 16) {
                 OptionGrid(columns: 1) {
                     let noEquipmentSelected = equipment.contains(.noEquipment)
@@ -237,8 +313,13 @@ struct OnboardingFlowView: View {
     }
 
     private var ftpScreen: some View {
-        OnboardingCard(question: "Do you know your cycling FTP?") {
+        OnboardingCard(question: "Do you know your FTP?") {
             VStack(spacing: 20) {
+                Text("Used to personalize cycling workouts. You can update this anytime.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
                 if !knowsFTP {
                     HStack(spacing: 12) {
                         Button {
@@ -290,9 +371,14 @@ struct OnboardingFlowView: View {
     // MARK: - Helpers
 
     private func advance() {
+        let fromStep = step
         withAnimation(.easeInOut(duration: 0.3)) {
             step = min(step + 1, totalSteps - 1)
         }
+        AnalyticsService.shared.track(.onboardingStepCompleted, properties: [
+            "step": fromStep,
+            "step_name": stepName(for: fromStep)
+        ])
     }
 
     private func goBack() {
@@ -336,6 +422,35 @@ struct OnboardingFlowView: View {
             ftp: Int(ftpText)
         )
         appState.completeOnboarding(profile: profile)
+
+        AnalyticsService.shared.track(.onboardingCompleted, properties: [
+            "has_ftp": profile.ftp != nil,
+            "equipment_count": profile.equipment.count,
+            "goal_count": profile.goals.count,
+            "has_trainer": profile.equipment.contains(.bikeTrainer)
+        ])
+        AnalyticsService.shared.setUserProperties([
+            "fitness_state": profile.currentState?.rawValue ?? "unknown",
+            "training_frequency": profile.trainingFrequency?.rawValue ?? "unknown",
+            "typical_availability": profile.typicalAvailability?.rawValue ?? "unknown",
+            "has_ftp": profile.ftp != nil,
+            "has_trainer": profile.equipment.contains(.bikeTrainer)
+        ])
+    }
+
+    private func stepName(for step: Int) -> String {
+        switch step {
+        case 0: "intro"
+        case 1: "how_it_works"
+        case 2: "name"
+        case 3: "fitness_state"
+        case 4: "goals"
+        case 5: "availability"
+        case 6: "frequency"
+        case 7: "equipment"
+        case 8: "ftp"
+        default: "unknown"
+        }
     }
 }
 

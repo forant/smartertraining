@@ -13,6 +13,7 @@ final class PostWorkoutReflectionService {
         steps: [TrainerWorkoutStep],
         checkIn: CheckIn?,
         memorySummary: TrainingMemorySummary,
+        upcomingContext: UpcomingContextSummary = .empty,
         auth: BackendAuthService
     ) async {
         guard auth.isSignedIn, let jwt = auth.jwt else {
@@ -23,12 +24,15 @@ final class PostWorkoutReflectionService {
         isLoading = true
         defer { isLoading = false }
 
+        AnalyticsService.shared.track(.postWorkoutReflectionRequested)
+
         let body = buildRequestBody(
             workout: workout,
             recommendation: recommendation,
             steps: steps,
             checkIn: checkIn,
-            memorySummary: memorySummary
+            memorySummary: memorySummary,
+            upcomingContext: upcomingContext
         )
 
         do {
@@ -45,6 +49,9 @@ final class PostWorkoutReflectionService {
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
                 reflection = buildFallback(workout: workout, recommendation: recommendation)
+                AnalyticsService.shared.track(.postWorkoutReflectionFailed, properties: [
+                    "reason": "non_200_response"
+                ])
                 return
             }
 
@@ -53,8 +60,16 @@ final class PostWorkoutReflectionService {
             decoder.dateDecodingStrategy = .iso8601
             let result = try decoder.decode(PostWorkoutReflection.self, from: data)
             reflection = result
+
+            AnalyticsService.shared.track(.postWorkoutReflectionSucceeded, properties: [
+                "is_fallback": result.isFallback
+            ])
         } catch {
             reflection = buildFallback(workout: workout, recommendation: recommendation)
+            AnalyticsService.shared.track(.postWorkoutReflectionFailed, properties: [
+                "error": AnalyticsProperties.sanitizeMessage(error.localizedDescription)
+            ])
+            ErrorLogger.log(.aiCoach, message: error.localizedDescription, subsystem: "reflection")
         }
     }
 
@@ -137,7 +152,8 @@ final class PostWorkoutReflectionService {
         recommendation: WorkoutRecommendation,
         steps: [TrainerWorkoutStep],
         checkIn: CheckIn?,
-        memorySummary: TrainingMemorySummary
+        memorySummary: TrainingMemorySummary,
+        upcomingContext: UpcomingContextSummary
     ) -> [String: Any] {
         var body: [String: Any] = [:]
 
@@ -213,6 +229,19 @@ final class PostWorkoutReflectionService {
             memory["last_feedback"] = fb.rawValue
         }
         body["training_memory"] = memory
+
+        if !upcomingContext.isEmpty {
+            body["upcoming_context"] = upcomingContext.events.map { event -> [String: Any] in
+                var dict: [String: Any] = [
+                    "type": event.type.rawValue,
+                    "days_until": event.daysFromNow,
+                    "impact": event.impact.rawValue
+                ]
+                if let dur = event.duration { dict["duration"] = dur.rawValue }
+                if let note = event.note { dict["note"] = String(note.prefix(200)) }
+                return dict
+            }
+        }
 
         return body
     }

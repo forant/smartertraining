@@ -75,6 +75,7 @@ final class HRMManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
             withServices: [Self.heartRateServiceUUID],
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
         )
+        AnalyticsService.shared.track(.hrmScanStarted)
     }
 
     func stopScanning() {
@@ -92,6 +93,7 @@ final class HRMManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         connectedPeripheral = device.peripheral
         device.peripheral.delegate = self
         centralManager.connect(device.peripheral, options: nil)
+        AnalyticsService.shared.track(.hrmConnectAttempted)
     }
 
     func disconnect() {
@@ -114,6 +116,9 @@ final class HRMManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         let peripherals = centralManager.retrievePeripherals(withIdentifiers: [identifier])
         guard let peripheral = peripherals.first else {
             connectionState = .disconnected
+            AnalyticsService.shared.track(.hrmReconnectFailed, properties: [
+                "reason": "peripheral_not_found"
+            ])
             return
         }
 
@@ -123,6 +128,7 @@ final class HRMManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         peripheral.delegate = self
         centralManager.connect(peripheral, options: nil)
         startReconnectTimer()
+        AnalyticsService.shared.track(.hrmReconnectAttempted)
     }
 
     private func startReconnectTimer() {
@@ -144,6 +150,9 @@ final class HRMManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         }
         connectedPeripheral = nil
         connectionState = .disconnected
+        AnalyticsService.shared.track(.hrmReconnectFailed, properties: [
+            "reason": "timeout"
+        ])
     }
 
     private func cancelReconnectTimer() {
@@ -197,6 +206,7 @@ final class HRMManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
             ?? advertisementData[CBAdvertisementDataLocalNameKey] as? String
             ?? "Heart Rate Monitor"
         discoveredDevices.append(HRMDevice(id: peripheral.identifier, name: name, peripheral: peripheral))
+        AnalyticsService.shared.track(.hrmFound)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
@@ -208,6 +218,10 @@ final class HRMManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         cancelReconnectTimer()
         connectionState = .error(error?.localizedDescription ?? "Connection failed")
         connectedPeripheral = nil
+        AnalyticsService.shared.track(.hrmConnectionFailed, properties: [
+            "error": AnalyticsProperties.sanitizeMessage(error?.localizedDescription ?? "unknown")
+        ])
+        ErrorLogger.log(.hrm, message: error?.localizedDescription ?? "Connection failed")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: (any Error)?) {
@@ -218,9 +232,11 @@ final class HRMManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
         #if DEBUG
         print("[HRM] Disconnected from \(name), attempting reconnect...")
         #endif
+        AnalyticsService.shared.track(.hrmDisconnected)
         connectionState = .connecting(deviceName: name)
         centralManager.connect(peripheral, options: nil)
         startReconnectTimer()
+        AnalyticsService.shared.track(.hrmReconnectAttempted)
     }
 
     // MARK: - CBPeripheralDelegate
@@ -249,6 +265,8 @@ final class HRMManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate
             displayName: name,
             lastConnectedAt: Date()
         )
+
+        AnalyticsService.shared.track(.hrmConnected)
 
         #if DEBUG
         print("[HRM] Connected and subscribed to \(name)")

@@ -31,7 +31,20 @@ final class BackendAuthService {
             throw AuthError.missingToken
         }
 
-        try await exchangeToken(identityToken: tokenString, fullName: credential.fullName)
+        AnalyticsService.shared.track(.siwaStarted)
+        do {
+            try await exchangeToken(identityToken: tokenString, fullName: credential.fullName)
+            AnalyticsService.shared.track(.siwaSucceeded)
+            if let userId {
+                AnalyticsService.shared.identify(userId: userId)
+                SentryService.setUser(id: userId)
+            }
+        } catch {
+            AnalyticsService.shared.track(.siwaFailed, properties: [
+                "error": AnalyticsProperties.sanitizeMessage(error.localizedDescription)
+            ])
+            throw error
+        }
     }
 
     func signOut() {
@@ -40,6 +53,8 @@ final class BackendAuthService {
         KeychainHelper.delete(forKey: Keys.expiresAt, service: Self.keychainService)
         isSignedIn = false
         userId = nil
+        AnalyticsService.shared.reset()
+        SentryService.clearUser()
     }
 
     private func exchangeToken(identityToken: String, fullName: PersonNameComponents?) async throws {

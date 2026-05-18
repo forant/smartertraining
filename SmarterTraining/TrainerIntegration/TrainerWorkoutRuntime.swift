@@ -58,7 +58,7 @@ final class TrainerWorkoutRuntime {
         if rampController.isRamping, let ramped = rampController.currentTarget() {
             return ramped
         }
-        return targetPower
+        return effectiveTargetPower
     }
 
     private var timer: Timer?
@@ -96,6 +96,13 @@ final class TrainerWorkoutRuntime {
 
     var targetPower: Int? {
         currentStep?.targetPower
+    }
+
+    var effectiveTargetPower: Int? {
+        guard let step = currentStep else { return nil }
+        guard let rampFrom = step.rampFromPower else { return step.targetPower }
+        let t = step.duration > 0 ? min(1.0, stepElapsed / step.duration) : 1.0
+        return rampFrom + Int(t * Double(step.targetPower - rampFrom))
     }
 
     var progress: Double {
@@ -189,13 +196,14 @@ final class TrainerWorkoutRuntime {
     private func trySendERGTarget(force: Bool = false) {
         guard ergEnabled, ergState == .active || ergState == .enabling else { return }
         guard let manager = trainerManager else { return }
-        guard let watts = targetPower else { return }
+        guard let watts = effectiveTargetPower else { return }
 
         if ergState == .enabling && !manager.controlAcquired {
             return
         }
 
-        if !force && watts == lastTargetSent && !rampController.isRamping {
+        let isStepRamp = currentStep?.rampFromPower != nil
+        if !force && !isStepRamp && watts == lastTargetSent && !rampController.isRamping {
             return
         }
 
@@ -208,7 +216,7 @@ final class TrainerWorkoutRuntime {
 
         let clamped = max(0, min(Int16.max, Int16(commandWatts)))
         manager.send(.setTargetPower(watts: clamped))
-        lastTargetSent = rampController.isRamping ? nil : watts
+        lastTargetSent = (rampController.isRamping || isStepRamp) ? nil : watts
 
         #if DEBUG
         if rampController.isRamping {
@@ -265,6 +273,7 @@ final class TrainerWorkoutRuntime {
         captureSample()
         updateERGState()
         updateRamp()
+        updateStepRamp()
         updateCadence()
 
         if let step = currentStep, stepElapsed >= step.duration {
@@ -272,8 +281,16 @@ final class TrainerWorkoutRuntime {
         }
     }
 
+    private func updateStepRamp() {
+        guard currentStep?.rampFromPower != nil else { return }
+        guard ergEnabled, ergState == .active else { return }
+        if Int(stepElapsed) % 3 == 0 {
+            trySendERGTarget(force: true)
+        }
+    }
+
     private func advanceStep() {
-        let previousTarget = currentStep?.targetPower
+        let previousTarget = effectiveTargetPower ?? currentStep?.targetPower
         let nextIndex = currentStepIndex + 1
         if nextIndex >= steps.count {
             finish()
@@ -284,8 +301,9 @@ final class TrainerWorkoutRuntime {
         cadenceGuidance.reset()
         cadenceStatus = .ok
 
-        if let prev = previousTarget, let next = currentStep?.targetPower {
-            rampController.beginRamp(from: prev, to: next)
+        if let prev = previousTarget, let step = currentStep {
+            let nextTarget = step.rampFromPower ?? step.targetPower
+            rampController.beginRamp(from: prev, to: nextTarget)
             lastRampCommandDate = nil
         }
         lastTargetSent = nil

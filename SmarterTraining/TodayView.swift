@@ -23,6 +23,7 @@ struct TodayView: View {
                         recommendation: appState.currentRecommendation,
                         isModified: editor?.isModified == true,
                         hasCyclingSteps: hasCyclingSteps,
+                        estimatedDuration: hasCyclingSteps ? estimatedWorkoutDuration : nil,
                         onStart: {
                             AnalyticsService.shared.track(.workoutStartTapped, properties: [
                                 "workout_type": appState.currentRecommendation.type.rawValue
@@ -190,6 +191,17 @@ struct TodayView: View {
         appState.currentRecommendation.steps.contains { $0.modality == .cycling || $0.modality == .recovery }
     }
 
+    private var estimatedWorkoutDuration: TimeInterval {
+        if let editor {
+            return editor.totalDuration
+        }
+        let steps = WorkoutConverter.convert(
+            recommendation: appState.currentRecommendation,
+            ftp: appState.userProfile.ftp
+        )
+        return steps.reduce(0) { $0 + $1.duration }
+    }
+
     private func ensureEditor() {
         guard editor == nil else { return }
         let steps = WorkoutConverter.convert(
@@ -227,6 +239,7 @@ struct WorkoutHeroCard: View {
     let recommendation: WorkoutRecommendation
     var isModified: Bool = false
     var hasCyclingSteps: Bool = false
+    var estimatedDuration: TimeInterval? = nil
     var onStart: (() -> Void)? = nil
     var onEdit: (() -> Void)? = nil
 
@@ -260,6 +273,12 @@ struct WorkoutHeroCard: View {
                 Text(recommendation.summary)
                     .font(.subheadline)
                     .foregroundStyle(Theme.TextStyle.onBrandSecondary)
+
+                if let duration = estimatedDuration {
+                    Text("Done by \(Date().addingTimeInterval(duration).formatted(date: .omitted, time: .shortened))")
+                        .font(.caption)
+                        .foregroundStyle(Theme.TextStyle.onBrandSecondary.opacity(0.8))
+                }
             }
 
             if isModified {

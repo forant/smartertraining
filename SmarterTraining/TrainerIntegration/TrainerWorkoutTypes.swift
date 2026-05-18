@@ -6,13 +6,15 @@ struct TrainerWorkoutStep: Codable, Identifiable {
     var duration: TimeInterval
     var targetPower: Int
     var role: WorkoutStepRole
+    var rampFromPower: Int?
 
-    init(id: UUID = UUID(), name: String, duration: TimeInterval, targetPower: Int, role: WorkoutStepRole) {
+    init(id: UUID = UUID(), name: String, duration: TimeInterval, targetPower: Int, role: WorkoutStepRole, rampFromPower: Int? = nil) {
         self.id = id
         self.name = name
         self.duration = duration
         self.targetPower = targetPower
         self.role = role
+        self.rampFromPower = rampFromPower
     }
 }
 
@@ -39,6 +41,15 @@ enum WorkoutConverter {
 
         let seconds = parseSimpleDuration(step.durationText)
         let watts = resolveTargetPower(step.targetText, role: step.role, workoutType: workoutType, ftp: ftp)
+
+        if let ftp, step.role == .warmup {
+            let floor = Int(Double(ftp) * 0.40)
+            return [TrainerWorkoutStep(name: step.name, duration: seconds, targetPower: watts, role: step.role, rampFromPower: floor)]
+        }
+        if let ftp, step.role == .cooldown {
+            let floor = Int(Double(ftp) * 0.35)
+            return [TrainerWorkoutStep(name: step.name, duration: seconds, targetPower: floor, role: step.role, rampFromPower: watts)]
+        }
 
         return [TrainerWorkoutStep(name: step.name, duration: seconds, targetPower: watts, role: step.role)]
     }

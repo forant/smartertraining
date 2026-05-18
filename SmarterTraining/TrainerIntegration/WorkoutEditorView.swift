@@ -11,6 +11,7 @@ final class WorkoutEditor {
         var duration: TimeInterval
         var targetPower: Int
         var role: WorkoutStepRole
+        var rampFromPower: Int?
         var intervalReps: Int?
         var restDuration: TimeInterval?
         var restPower: Int?
@@ -120,7 +121,8 @@ final class WorkoutEditor {
                     name: group.name,
                     duration: group.duration,
                     targetPower: group.targetPower,
-                    role: group.role
+                    role: group.role,
+                    rampFromPower: group.rampFromPower
                 ))
             }
         }
@@ -166,7 +168,8 @@ final class WorkoutEditor {
                 name: step.name,
                 duration: step.duration,
                 targetPower: step.targetPower,
-                role: step.role
+                role: step.role,
+                rampFromPower: step.rampFromPower
             ))
             i += 1
         }
@@ -264,12 +267,24 @@ struct WorkoutEditorView: View {
             } onIncrement: {
                 editor.groups[index].duration = min(Bounds.maxDuration, group.duration + Bounds.durationStep)
             }
-            adjustableRow("Target", value: "\(group.targetPower)W") {
+            adjustableRow("Target", value: targetLabel(group)) {
                 editor.groups[index].targetPower = max(Bounds.minWatts, group.targetPower - Bounds.wattsStep)
             } onIncrement: {
                 editor.groups[index].targetPower = min(Bounds.maxWatts, group.targetPower + Bounds.wattsStep)
             }
+            if group.rampFromPower != nil {
+                Text("Ramps gradually")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
         }
+    }
+
+    private func targetLabel(_ group: WorkoutEditor.StepGroup) -> String {
+        if let rampFrom = group.rampFromPower {
+            return "\(rampFrom) → \(group.targetPower)W"
+        }
+        return "\(group.targetPower)W"
     }
 
     // MARK: - Interval Set

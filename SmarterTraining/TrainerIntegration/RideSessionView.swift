@@ -16,6 +16,7 @@ struct RideSessionView: View {
     @State private var phase: SessionPhase = .connecting
     @State private var completedWorkout: CompletedWorkout?
     @State private var ergToggle = false
+    @State private var keepScreenOn = true
     @State private var editor: WorkoutEditor?
     @State private var showingEditor = false
     @State private var healthKit = HealthKitManager()
@@ -92,6 +93,17 @@ struct RideSessionView: View {
                     }
                 }
             }
+            .onChange(of: phase) { _, newPhase in
+                UIApplication.shared.isIdleTimerDisabled = (newPhase == .riding && keepScreenOn)
+            }
+            .onChange(of: keepScreenOn) { _, newValue in
+                if phase == .riding {
+                    UIApplication.shared.isIdleTimerDisabled = newValue
+                }
+            }
+            .onDisappear {
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
         }
     }
 
@@ -99,9 +111,22 @@ struct RideSessionView: View {
         switch phase {
         case .connecting: "Connect Trainer"
         case .ready: "Ready"
-        case .riding: recommendation.title
+        case .riding: effectiveTitle
         case .finished: "Workout Complete"
         }
+    }
+
+    private var effectiveTitle: String {
+        guard let editor, editor.isModified else { return recommendation.title }
+        let steps = editor.toSteps()
+        let totalMinutes = Int(steps.reduce(0) { $0 + $1.duration }) / 60
+        let intervalSteps = steps.filter { $0.name.contains("Interval") }
+        if !intervalSteps.isEmpty {
+            let reps = intervalSteps.count
+            let workMins = Int(intervalSteps.first!.duration) / 60
+            return "\(reps)\u{00D7}\(workMins) min Intervals"
+        }
+        return "\(totalMinutes) min \(recommendation.type.label) Ride"
     }
 
     // MARK: - Ready View
@@ -119,13 +144,17 @@ struct RideSessionView: View {
 
             if let editor {
                 VStack(spacing: 8) {
-                    Text(recommendation.title)
+                    Text(effectiveTitle)
                         .font(.title2)
                         .fontWeight(.bold)
 
                     Text("\(editor.totalStepCount) steps \u{00B7} \(formatDuration(editor.totalDuration))")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+
+                    Text("Done by \(estimatedEndTime(in: editor.totalDuration))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
 
                     if editor.isModified {
                         Label("Modified from today's recommendation", systemImage: "pencil")
@@ -263,7 +292,7 @@ struct RideSessionView: View {
 
         let ride = CompletedWorkout(
             startDate: Date(),
-            title: recommendation.title,
+            title: effectiveTitle,
             status: .inProgress
         )
         completedWorkout = ride
@@ -318,7 +347,7 @@ struct RideSessionView: View {
             Divider()
             stepInfo(runtime)
             Spacer()
-            midRideERGToggle(runtime)
+            midRideToggles(runtime)
             rideControls(runtime)
         }
         .padding()
@@ -371,7 +400,7 @@ struct RideSessionView: View {
             var ride = CompletedWorkout(
                 startDate: runtime.startDate ?? Date(),
                 duration: runtime.totalElapsed,
-                title: recommendation.title,
+                title: effectiveTitle,
                 samples: runtime.samples,
                 status: .finished,
                 averageHeartRate: avgHR,
@@ -608,9 +637,15 @@ struct RideSessionView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(step.name)
                             .font(.headline)
-                        Text("\(step.targetPower)W target")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                        if let rampFrom = step.rampFromPower {
+                            Text("\(min(rampFrom, step.targetPower))W → \(max(rampFrom, step.targetPower))W")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("\(step.targetPower)W target")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     Spacer()
                     Text(formatDuration(runtime.stepRemaining))
@@ -626,9 +661,15 @@ struct RideSessionView: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                     Spacer()
-                    Text("\(next.targetPower)W \u{00B7} \(formatDuration(next.duration))")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                    if let rampFrom = next.rampFromPower {
+                        Text("\(min(rampFrom, next.targetPower))–\(max(rampFrom, next.targetPower))W · \(formatDuration(next.duration))")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        Text("\(next.targetPower)W · \(formatDuration(next.duration))")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
 
@@ -641,6 +682,16 @@ struct RideSessionView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
+            }
+
+            HStack {
+                Text("Done by")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+                Text(estimatedEndTime(in: runtime.totalDuration - runtime.totalElapsed))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
         }
         .padding(.vertical, 16)
@@ -843,10 +894,10 @@ struct RideSessionView: View {
         }
     }
 
-    // MARK: - Mid-Ride ERG Toggle
+    // MARK: - Mid-Ride Toggles
 
-    private func midRideERGToggle(_ runtime: TrainerWorkoutRuntime) -> some View {
-        HStack {
+    private func midRideToggles(_ runtime: TrainerWorkoutRuntime) -> some View {
+        HStack(spacing: 12) {
             Toggle(isOn: $ergToggle) {
                 HStack(spacing: 6) {
                     Image(systemName: ergToggle ? "bolt.fill" : "bolt.slash")
@@ -860,6 +911,23 @@ struct RideSessionView: View {
             .toggleStyle(.switch)
             .controlSize(.mini)
             .tint(.green)
+
+            Divider()
+                .frame(height: 20)
+
+            Toggle(isOn: $keepScreenOn) {
+                HStack(spacing: 6) {
+                    Image(systemName: keepScreenOn ? "sun.max.fill" : "moon.fill")
+                        .font(.caption)
+                        .foregroundStyle(keepScreenOn ? .yellow : .secondary)
+                    Text("Screen")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .tint(.yellow)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -875,5 +943,9 @@ struct RideSessionView: View {
         let m = total / 60
         let s = total % 60
         return String(format: "%d:%02d", m, s)
+    }
+
+    private func estimatedEndTime(in seconds: TimeInterval) -> String {
+        Date().addingTimeInterval(max(0, seconds)).formatted(date: .omitted, time: .shortened)
     }
 }

@@ -113,9 +113,7 @@ final class StravaAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
     // MARK: - Private
 
     private func exchangeToken(code: String) async throws {
-        let body: [String: String] = [
-            "client_id": StravaConfig.clientID,
-            "client_secret": StravaConfig.clientSecret,
+        let body: [String: Any] = [
             "code": code,
             "grant_type": "authorization_code"
         ]
@@ -127,9 +125,7 @@ final class StravaAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
             disconnect()
             throw StravaError.notConnected
         }
-        let body: [String: String] = [
-            "client_id": StravaConfig.clientID,
-            "client_secret": StravaConfig.clientSecret,
+        let body: [String: Any] = [
             "refresh_token": refreshToken,
             "grant_type": "refresh_token"
         ]
@@ -140,11 +136,14 @@ final class StravaAuth: NSObject, ASWebAuthenticationPresentationContextProvidin
         return token
     }
 
-    private func performTokenRequest(body: [String: String]) async throws {
-        var request = URLRequest(url: URL(string: StravaConfig.tokenURL)!)
+    private func performTokenRequest(body: [String: Any]) async throws {
+        guard let url = URL(string: StravaConfig.tokenProxyURL) else {
+            throw StravaError.tokenExchangeFailed("Invalid token proxy URL")
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = body.map { "\($0.key)=\($0.value)" }.joined(separator: "&").data(using: .utf8)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
 

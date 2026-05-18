@@ -1,4 +1,5 @@
 import SwiftUI
+import SafariServices
 import StoreKit
 
 struct FoundingPaywallView: View {
@@ -7,6 +8,7 @@ struct FoundingPaywallView: View {
 
     @State private var isPurchasing = false
     @State private var isRestoring = false
+    @State private var safariURL: URL?
 
     var body: some View {
         ScrollView {
@@ -23,6 +25,10 @@ struct FoundingPaywallView: View {
         .task {
             await subscriptionService.loadProducts()
             AnalyticsService.shared.track(.paywallViewed)
+        }
+        .sheet(item: $safariURL) { url in
+            SafariView(url: url)
+                .ignoresSafeArea()
         }
     }
 
@@ -260,8 +266,12 @@ struct FoundingPaywallView: View {
             .foregroundStyle(.secondary)
 
             HStack(spacing: 16) {
-                Link("Privacy Policy", destination: URL(string: "https://smartertraining.ai/privacy")!)
-                Link("Terms of Service", destination: URL(string: "https://smartertraining.ai/terms")!)
+                Button("Privacy Policy") {
+                    safariURL = URL(string: "https://smartertraining.ai/privacy")!
+                }
+                Button("Terms of Service") {
+                    safariURL = URL(string: "https://smartertraining.ai/terms")!
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)

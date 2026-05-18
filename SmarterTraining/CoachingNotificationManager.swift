@@ -25,15 +25,9 @@ final class CoachingNotificationManager {
         }
     }
 
-    var hasPermission: Bool {
-        var result = false
-        let semaphore = DispatchSemaphore(value: 0)
-        center.getNotificationSettings { settings in
-            result = settings.authorizationStatus == .authorized
-            semaphore.signal()
-        }
-        semaphore.wait()
-        return result
+    func hasPermission() async -> Bool {
+        let settings = await center.notificationSettings()
+        return settings.authorizationStatus == .authorized
     }
 
     // MARK: - Scheduling

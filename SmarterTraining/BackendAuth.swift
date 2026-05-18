@@ -57,8 +57,7 @@ final class BackendAuthService {
 
     func deleteAccount() async throws {
         guard let jwt else {
-            signOut()
-            return
+            throw AuthError.serverError("Please sign in to delete your account")
         }
 
         let url = URL(string: "\(Self.baseURL)/v1/account")!

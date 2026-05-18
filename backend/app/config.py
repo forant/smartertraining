@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     openai_api_key: Optional[str] = None
     openai_model: str = "gpt-4o-mini"
 
+    strava_client_id: Optional[str] = None
+    strava_client_secret: Optional[str] = None
+
     # Sign in with Apple — required for token revocation on account deletion.
     # APPLE_TEAM_ID: Your Apple Developer Team ID (10-char alphanumeric).
     # APPLE_KEY_ID: Key ID for the Sign in with Apple private key.

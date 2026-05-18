@@ -10,7 +10,7 @@ enum SentryService {
             options.releaseName = "\(Bundle.main.bundleIdentifier ?? "com.smartertraining")@\(AnalyticsConfig.appVersion)+\(AnalyticsConfig.buildNumber)"
             options.enableAutoSessionTracking = true
             options.enableCaptureFailedRequests = true
-            options.attachScreenshot = true
+            options.attachScreenshot = false
             options.enableMetricKit = true
             #if DEBUG
             options.debug = true

@@ -1,4 +1,5 @@
 import SwiftUI
+import SafariServices
 import AuthenticationServices
 import Sentry
 
@@ -16,6 +17,7 @@ struct SettingsView: View {
     @State private var showDeleteConfirmation = false
     @State private var isDeletingAccount = false
     @State private var deleteError: String?
+    @State private var safariURL: URL?
 
     var body: some View {
         NavigationStack {
@@ -39,6 +41,10 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
+            }
+            .sheet(item: $safariURL) { url in
+                SafariView(url: url)
+                    .ignoresSafeArea()
             }
         }
     }
@@ -174,7 +180,9 @@ struct SettingsView: View {
                         }
                     }
                 case .failure(let error):
-                    signInError = error.localizedDescription
+                    if (error as? ASAuthorizationError)?.code != .canceled {
+                        signInError = error.localizedDescription
+                    }
                 }
             }
             .frame(height: 44)
@@ -299,6 +307,8 @@ struct SettingsView: View {
                         stravaError = nil
                         do {
                             try await stravaAuth.authorize()
+                        } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+                            // User dismissed the auth sheet — not an error.
                         } catch {
                             stravaError = error.localizedDescription
                         }
@@ -474,7 +484,9 @@ struct SettingsView: View {
                     .foregroundStyle(.tertiary)
             }
 
-            Link(destination: URL(string: "https://smartertraining.ai/privacy")!) {
+            Button {
+                safariURL = URL(string: "https://smartertraining.ai/privacy")!
+            } label: {
                 HStack {
                     Text("Privacy Policy")
                         .font(.subheadline)
@@ -485,7 +497,9 @@ struct SettingsView: View {
                 }
             }
 
-            Link(destination: URL(string: "https://smartertraining.ai/terms")!) {
+            Button {
+                safariURL = URL(string: "https://smartertraining.ai/terms")!
+            } label: {
                 HStack {
                     Text("Terms of Service")
                         .font(.subheadline)
@@ -660,4 +674,18 @@ struct SettingsView: View {
         }
     }
     #endif
+}
+
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
+
+struct SafariView: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        SFSafariViewController(url: url)
+    }
+
+    func updateUIViewController(_ uiViewController: SFSafariViewController, context: Context) {}
 }

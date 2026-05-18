@@ -12,6 +12,8 @@ struct TodayView: View {
     @State private var editingUpcomingContextEvent: UpcomingContextEvent?
     @State private var editor: WorkoutEditor?
     @State private var aiCoach = AICoachService()
+    @State private var todayRide: CompletedWorkout?
+    @State private var showingWorkoutDetail = false
 
     var body: some View {
         NavigationStack {
@@ -19,29 +21,43 @@ struct TodayView: View {
                 VStack(spacing: Theme.Spacing.lg) {
                     header
 
-                    WorkoutHeroCard(
-                        recommendation: appState.currentRecommendation,
-                        isModified: editor?.isModified == true,
-                        hasCyclingSteps: hasCyclingSteps,
-                        estimatedDuration: hasCyclingSteps ? estimatedWorkoutDuration : nil,
-                        onStart: {
-                            AnalyticsService.shared.track(.workoutStartTapped, properties: [
-                                "workout_type": appState.currentRecommendation.type.rawValue
-                            ])
-                            showingRideSession = true
-                        },
-                        onEdit: hasCyclingSteps ? {
-                            ensureEditor()
-                            showingEditor = true
-                            AnalyticsService.shared.track(.workoutEditorOpened)
-                        } : nil
-                    )
-                    .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.type)
-                    .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.title)
+                    if let todayRide {
+                        CompletedHeroCard(
+                            ride: todayRide,
+                            onViewSummary: { showingWorkoutDetail = true },
+                            onStartAnother: { showingRideSession = true }
+                        )
+
+                        if !todayRide.samples.isEmpty {
+                            WorkoutChartsSection(workout: todayRide)
+                        }
+                    } else {
+                        WorkoutHeroCard(
+                            recommendation: appState.currentRecommendation,
+                            isModified: editor?.isModified == true,
+                            hasCyclingSteps: hasCyclingSteps,
+                            estimatedDuration: hasCyclingSteps ? estimatedWorkoutDuration : nil,
+                            onStart: {
+                                AnalyticsService.shared.track(.workoutStartTapped, properties: [
+                                    "workout_type": appState.currentRecommendation.type.rawValue
+                                ])
+                                showingRideSession = true
+                            },
+                            onEdit: hasCyclingSteps ? {
+                                ensureEditor()
+                                showingEditor = true
+                                AnalyticsService.shared.track(.workoutEditorOpened)
+                            } : nil
+                        )
+                        .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.type)
+                        .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.title)
+                    }
 
                     coachExplanationCard
 
-                    WorkoutBreakdownCard(steps: appState.currentRecommendation.steps)
+                    if todayRide == nil {
+                        WorkoutBreakdownCard(steps: appState.currentRecommendation.steps)
+                    }
 
                     WorkoutFeedbackCard(
                         selectedFeedback: appState.todayFeedback,
@@ -53,7 +69,7 @@ struct TodayView: View {
                         onEdit: { editingUpcomingContextEvent = $0 }
                     )
 
-                    if !appState.currentRecommendation.optionalExtras.isEmpty {
+                    if todayRide == nil && !appState.currentRecommendation.optionalExtras.isEmpty {
                         OptionalExtrasCard(extras: appState.currentRecommendation.optionalExtras)
                     }
 
@@ -108,6 +124,24 @@ struct TodayView: View {
                     existingEditor: editor
                 )
             }
+            .sheet(isPresented: $showingWorkoutDetail) {
+                if let entry = todayHistoryEntry, let ride = todayRide {
+                    NavigationStack {
+                        WorkoutDetailView(entry: entry, ride: ride)
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("Done") { showingWorkoutDetail = false }
+                                }
+                            }
+                    }
+                }
+            }
+            .onAppear {
+                loadTodayRide()
+            }
+            .onChange(of: showingRideSession) { _, isShowing in
+                if !isShowing { loadTodayRide() }
+            }
             .task(id: appState.lastCheckInDate) {
                 await fetchAIExplanation()
             }
@@ -115,6 +149,25 @@ struct TodayView: View {
                 editor = nil
                 aiCoach.invalidateCache()
             }
+        }
+    }
+
+    // MARK: - State Helpers
+
+    private var headerSubtitle: String {
+        if todayRide != nil { return "Workout done" }
+        return appState.latestCheckIn != nil
+            ? "Here\u{2019}s the right move for today"
+            : "Your plan is ready"
+    }
+
+    private var todayHistoryEntry: WorkoutHistoryEntry? {
+        appState.recentHistory.last { Calendar.current.isDateInToday($0.date) }
+    }
+
+    private func loadTodayRide() {
+        todayRide = appState.store.finishedRides().first {
+            Calendar.current.isDateInToday($0.startDate)
         }
     }
 
@@ -126,9 +179,7 @@ struct TodayView: View {
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
-            Text(appState.latestCheckIn != nil
-                 ? "Here\u{2019}s the right move for today"
-                 : "Your plan is ready")
+            Text(headerSubtitle)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -309,6 +360,78 @@ struct WorkoutHeroCard: View {
         .padding(Theme.Spacing.xl)
         .background(Theme.Brand.heroGradient)
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+    }
+}
+
+// MARK: - Completed Hero Card
+
+struct CompletedHeroCard: View {
+    let ride: CompletedWorkout
+    let onViewSummary: () -> Void
+    let onStartAnother: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.TextStyle.onBrandSecondary)
+                Text("COMPLETED")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundStyle(Theme.TextStyle.onBrandSecondary)
+                    .tracking(0.8)
+            }
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Text(ride.title)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundStyle(Theme.TextStyle.onBrand)
+
+                Text(summaryLine)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.TextStyle.onBrandSecondary)
+            }
+
+            Button(action: onViewSummary) {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Image(systemName: "chart.xyaxis.line")
+                        .font(.subheadline)
+                    Text("View Summary")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Theme.Spacing.md)
+                .background(.white)
+                .foregroundStyle(Theme.Brand.primary)
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+            }
+            .buttonStyle(.plain)
+
+            Button(action: onStartAnother) {
+                Text("Start another workout")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(Theme.TextStyle.onBrandSecondary.opacity(0.7))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Spacing.xl)
+        .background(Theme.Brand.heroGradient)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+    }
+
+    private var summaryLine: String {
+        let minutes = Int(ride.duration) / 60
+        var parts = ["\(minutes) min"]
+        if let avg = ride.averagePower {
+            parts.append("\(avg)W avg")
+        }
+        return parts.joined(separator: " · ")
     }
 }
 

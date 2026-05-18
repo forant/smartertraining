@@ -86,17 +86,18 @@ final class BackendSyncService {
             var dict: [String: Any] = [
                 "record_type": envelope.recordType,
                 "record_id": envelope.recordId.uuidString,
+                "created_at": formatter.string(from: envelope.updatedAt),
                 "updated_at": formatter.string(from: envelope.updatedAt)
             ]
-            if let payload = try? JSONSerialization.jsonObject(with: envelope.payload) as? [String: Any] {
-                dict["payload"] = payload
+            if let data = try? JSONSerialization.jsonObject(with: envelope.payload) as? [String: Any] {
+                dict["data"] = data
             }
             return dict
         }
 
         var body: [String: Any] = ["records": recordDicts]
         if let since {
-            body["last_synced_at"] = formatter.string(from: since)
+            body["client_last_synced_at"] = formatter.string(from: since)
         }
 
         let url = URL(string: "\(BackendAuthService.baseURL)/v1/sync")!
@@ -134,7 +135,7 @@ final class BackendSyncService {
                   let id = UUID(uuidString: idString),
                   let updatedString = dict["updated_at"] as? String,
                   let updated = formatter.date(from: updatedString),
-                  let payload = dict["payload"] else { return nil }
+                  let payload = dict["data"] else { return nil }
 
             guard let payloadData = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
             return SyncRecordEnvelope(recordType: type, recordId: id, updatedAt: updated, payload: payloadData)

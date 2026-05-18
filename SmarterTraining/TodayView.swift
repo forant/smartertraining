@@ -39,7 +39,6 @@ struct TodayView: View {
                     .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.title)
 
                     coachExplanationCard
-                        .animation(.easeInOut(duration: 0.3), value: coachExplanationText)
 
                     WorkoutBreakdownCard(steps: appState.currentRecommendation.steps)
 
@@ -137,17 +136,6 @@ struct TodayView: View {
 
     // MARK: - Coach Explanation
 
-    private var isAwaitingAI: Bool {
-        aiCoach.isLoading || (!aiCoach.hasAttemptedFetch && appState.auth.isSignedIn)
-    }
-
-    private var coachExplanationText: String {
-        if let ai = aiCoach.explanation, !ai.isFallback {
-            return ai.coachExplanation
-        }
-        return appState.currentRecommendation.reason
-    }
-
     private var coachExplanationCard: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
             Text("WHY THIS")
@@ -156,23 +144,17 @@ struct TodayView: View {
                 .foregroundStyle(Theme.Brand.primary)
                 .tracking(0.5)
 
-            if isAwaitingAI {
-                Text("Thinking about today\u{2026}")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                Text(coachExplanationText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            Text(appState.currentRecommendation.reason)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-                if let ai = aiCoach.explanation, !ai.isFallback, let tomorrow = ai.tomorrowImplication {
-                    Text(tomorrow)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                        .italic()
-                }
+            if let ai = aiCoach.explanation, !ai.isFallback, let tomorrow = ai.tomorrowImplication {
+                Text(tomorrow)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .italic()
+                    .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -183,6 +165,7 @@ struct TodayView: View {
             RoundedRectangle(cornerRadius: Theme.Radius.lg)
                 .stroke(Theme.Border.subtle, lineWidth: Theme.Border.width)
         )
+        .animation(.easeIn(duration: 0.3), value: aiCoach.explanation?.tomorrowImplication)
     }
 
     private func fetchAIExplanation() async {

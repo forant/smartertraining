@@ -27,15 +27,29 @@ class AuthResponse(BaseModel):
 class SyncRecordIn(BaseModel):
     record_type: str
     record_id: UUID
-    created_at: datetime
+    created_at: Optional[datetime] = None
     updated_at: datetime
     deleted_at: Optional[datetime] = None
-    data: Dict
+    data: Optional[Dict] = None
+    payload: Optional[Dict] = None
+
+    @property
+    def effective_data(self) -> Dict:
+        return self.data or self.payload or {}
+
+    @property
+    def effective_created_at(self) -> datetime:
+        return self.created_at or self.updated_at
 
 
 class SyncRequest(BaseModel):
     client_last_synced_at: Optional[datetime] = None
+    last_synced_at: Optional[datetime] = None
     records: List[SyncRecordIn]
+
+    @property
+    def effective_last_synced_at(self) -> Optional[datetime]:
+        return self.client_last_synced_at or self.last_synced_at
 
 
 class SyncRecordOut(BaseModel):

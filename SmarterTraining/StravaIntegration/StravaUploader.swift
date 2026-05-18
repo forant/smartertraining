@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 enum UploadState: Equatable {
     case idle
@@ -20,6 +21,7 @@ final class StravaUploader {
         self.auth = auth
     }
 
+    @MainActor
     func upload(workout: CompletedWorkout) async {
         state = .uploading
         AnalyticsService.shared.track(.stravaUploadStarted, properties: [
@@ -34,6 +36,10 @@ final class StravaUploader {
             let activityId = try await pollUploadStatus(uploadId: uploadId, token: token)
             state = .success(activityId: activityId)
             AnalyticsService.shared.track(.stravaUploadSucceeded)
+
+            if let cardImage = StravaCardRenderer.render(workout: workout) {
+                await uploadPhoto(image: cardImage, activityId: activityId, token: token)
+            }
         } catch {
             state = .failed(error.localizedDescription)
             AnalyticsService.shared.track(.stravaUploadFailed, properties: [
@@ -111,6 +117,38 @@ final class StravaUploader {
         }
 
         throw UploadError.timeout
+    }
+
+    // MARK: - Photo Upload
+
+    private func uploadPhoto(image: UIImage, activityId: Int64, token: String) async {
+        guard let jpegData = image.jpegData(compressionQuality: 0.9) else { return }
+
+        let boundary = UUID().uuidString
+        let url = URL(string: "https://www.strava.com/api/v3/activities/\(activityId)/photos")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        body.append("--\(boundary)\r\n")
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"workout_card.jpg\"\r\n")
+        body.append("Content-Type: image/jpeg\r\n\r\n")
+        body.append(jpegData)
+        body.append("\r\n")
+        body.append("--\(boundary)--\r\n")
+
+        request.httpBody = body
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            if let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) {
+                AnalyticsService.shared.track(.stravaUploadSucceeded, properties: ["photo": true])
+            }
+        } catch {
+            // Photo upload is best-effort — don't affect the activity upload state
+        }
     }
 
     // MARK: - Multipart Body

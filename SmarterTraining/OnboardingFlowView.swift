@@ -466,6 +466,7 @@ struct OnboardingCard<Content: View>: View {
                 .font(.title2)
                 .fontWeight(.semibold)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
 
             content
 
@@ -490,8 +491,11 @@ struct OnboardingPill: View {
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .foregroundStyle(dimmed ? .tertiary : .primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
+                .padding(.horizontal, 12)
                 .background(isSelected ? Theme.Surface.selectedControl : Theme.Surface.unselectedControl)
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.lg)

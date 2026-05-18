@@ -178,6 +178,7 @@ struct CheckInView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 FlowLayout(spacing: 10) {
                     ForEach(activityOptions, id: \.1) { emoji, label in
@@ -370,6 +371,7 @@ struct CheckInCard<Content: View>: View {
                 .font(.title2)
                 .fontWeight(.semibold)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
 
             content
 

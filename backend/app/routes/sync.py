@@ -44,8 +44,8 @@ async def sync(
                 user_id=user_id,
                 record_type=rec.record_type,
                 record_id=rec.record_id,
-                data=rec.data,
-                created_at=rec.created_at,
+                data=rec.effective_data,
+                created_at=rec.effective_created_at,
                 updated_at=rec.updated_at,
                 deleted_at=rec.deleted_at,
             )
@@ -53,7 +53,7 @@ async def sync(
         else:
             # Last-write-wins: only apply if incoming is newer.
             if _ensure_aware(rec.updated_at) > _ensure_aware(existing.updated_at):
-                existing.data = rec.data
+                existing.data = rec.effective_data
                 existing.updated_at = rec.updated_at
                 existing.deleted_at = rec.deleted_at
 
@@ -61,9 +61,10 @@ async def sync(
 
     # Return records changed since client_last_synced_at (or all if None).
     query = select(TrainingRecord).where(TrainingRecord.user_id == user_id)
-    if body.client_last_synced_at is not None:
+    since = body.effective_last_synced_at
+    if since is not None:
         query = query.where(
-            TrainingRecord.updated_at > body.client_last_synced_at
+            TrainingRecord.updated_at > since
         )
 
     result = await session.execute(query)

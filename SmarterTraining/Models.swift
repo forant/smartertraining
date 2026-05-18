@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UserNotifications
 
 // MARK: - User Profile & Onboarding
 
@@ -368,6 +369,32 @@ final class AppState {
         store.saveUpcomingContext(upcomingContextEvents)
         refreshRecommendationIfCheckedIn()
         triggerSync()
+    }
+
+    // MARK: - Account Deletion
+
+    func deleteAllLocalData() {
+        hasCompletedOnboarding = false
+        userProfile = .empty
+        latestCheckIn = nil
+        lastCheckInDate = nil
+        todayFeedback = nil
+        currentRecommendation = .preview
+        recentHistory.removeAll()
+        upcomingContextEvents.removeAll()
+
+        defaults.removeObject(forKey: Keys.onboardingComplete)
+        defaults.removeObject(forKey: Keys.userProfile)
+        defaults.removeObject(forKey: Keys.checkIn)
+        defaults.removeObject(forKey: Keys.checkInDate)
+
+        store.deleteAllData()
+
+        CoachingNotificationManager.shared.cancelExistingCoachingNotifications()
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+
+        RememberedDeviceStore.shared.forgetTrainer()
+        RememberedDeviceStore.shared.forgetHRM()
     }
 
     private func refreshRecommendationIfCheckedIn() {

@@ -128,6 +128,11 @@ struct AnalyticsEventTests {
             .upcomingContextAdded, .upcomingContextEdited, .upcomingContextDeleted,
             .notificationPermissionRequested, .notificationPermissionGranted, .notificationPermissionDenied,
             .coachingNotificationScheduled,
+            .paywallViewed, .freeFounderSelected,
+            .purchaseMonthlyTapped, .purchaseAnnualTapped,
+            .purchaseSucceeded, .purchaseCancelled, .purchaseFailed,
+            .restoreTapped, .restoreSucceeded, .restoreFailed,
+            .entitlementResolved,
         ]
     }
 }
@@ -320,7 +325,7 @@ struct ErrorCategoryTests {
     @Test func allCategoriesHaveSnakeCaseRawValues() {
         let categories: [ErrorCategory] = [
             .bluetooth, .erg, .hrm, .healthkit, .strava,
-            .backendSync, .aiCoach, .persistence, .notification
+            .backendSync, .aiCoach, .persistence, .notification, .subscription
         ]
         for cat in categories {
             #expect(cat.rawValue == cat.rawValue.lowercased())

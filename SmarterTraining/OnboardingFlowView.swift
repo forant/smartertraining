@@ -492,12 +492,12 @@ struct OnboardingPill: View {
                 .foregroundStyle(dimmed ? .tertiary : .primary)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(isSelected ? Color.accentColor.opacity(0.15) : Color(.systemGray6))
+                .background(isSelected ? Theme.Surface.selectedControl : Theme.Surface.unselectedControl)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                    RoundedRectangle(cornerRadius: Theme.Radius.lg)
+                        .stroke(isSelected ? Theme.Border.selected : .clear, lineWidth: Theme.Border.selectedWidth)
                 )
-                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg))
         }
         .buttonStyle(.plain)
     }

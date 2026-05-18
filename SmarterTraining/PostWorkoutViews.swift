@@ -31,12 +31,12 @@ struct PostWorkoutFeedbackView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(isSelected ? Color.accentColor.opacity(0.15) : Color(.systemGray6))
+                        .background(isSelected ? Theme.Surface.selectedControl : Theme.Surface.unselectedControl)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                            RoundedRectangle(cornerRadius: Theme.Radius.lg)
+                                .stroke(isSelected ? Theme.Border.selected : .clear, lineWidth: Theme.Border.selectedWidth)
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg))
                     }
                     .buttonStyle(.plain)
                 }
@@ -117,7 +117,7 @@ struct PostWorkoutFeedbackView: View {
     private func effortColor(_ level: Int) -> Color {
         switch level {
         case 1...3: .green
-        case 4...6: .blue
+        case 4...6: Theme.Brand.primary
         case 7...8: .orange
         case 9...10: .red
         default: .primary
@@ -300,7 +300,7 @@ struct PostWorkoutReflectionCard: View {
         switch intensity {
         case "rest": .gray
         case "recovery": .green
-        case "endurance": .blue
+        case "endurance": Theme.Semantic.endurance
         case "quality": .orange
         default: .secondary
         }

@@ -5,20 +5,29 @@ import Sentry
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
+    var subscriptionService: SubscriptionService?
     @State private var stravaAuth = StravaAuth()
     @State private var healthKit = HealthKitManager()
     @State private var signInError: String?
     @State private var isAuthorizingStrava = false
     @State private var stravaError: String?
     @State private var showCrashConfirmation = false
+    @State private var isRestoring = false
+    @State private var showDeleteConfirmation = false
+    @State private var isDeletingAccount = false
+    @State private var deleteError: String?
 
     var body: some View {
         NavigationStack {
             List {
+                if let subscriptionService {
+                    membershipSection(subscriptionService)
+                }
                 accountSection
                 devicesSection
                 integrationsSection
                 trainingDataSection
+                dangerZoneSection
                 aboutSection
                 #if DEBUG
                 debugSection
@@ -31,6 +40,47 @@ struct SettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+
+    // MARK: - Membership
+
+    private func membershipSection(_ service: SubscriptionService) -> some View {
+        Section {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(service.entitlement.displayName)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Text("Active")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                }
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+
+            Button {
+                Task {
+                    isRestoring = true
+                    await service.restorePurchases()
+                    isRestoring = false
+                }
+            } label: {
+                if isRestoring {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Text("Restore purchases")
+                }
+            }
+            .font(.subheadline)
+        } header: {
+            Text("Membership")
+        } footer: {
+            Text("Manage your subscription in Settings \u{203A} Apple ID \u{203A} Subscriptions.")
         }
     }
 
@@ -340,6 +390,77 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - Danger Zone
+
+    private var dangerZoneSection: some View {
+        Section {
+            Button(role: .destructive) {
+                AnalyticsService.shared.track(.deleteAccountTapped)
+                showDeleteConfirmation = true
+            } label: {
+                HStack {
+                    Text("Delete my account")
+                        .font(.subheadline)
+                    if isDeletingAccount {
+                        Spacer()
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .disabled(isDeletingAccount)
+            .confirmationDialog(
+                "Delete account?",
+                isPresented: $showDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete account", role: .destructive) {
+                    performAccountDeletion()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently deletes your SmarterTraining account, training data, check-ins, and local app data. This can\u{2019}t be undone.")
+            }
+
+            if let deleteError {
+                Label(deleteError, systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        } footer: {
+            Text("Deletes all data and returns the app to its initial state.")
+        }
+    }
+
+    private func performAccountDeletion() {
+        isDeletingAccount = true
+        deleteError = nil
+        AnalyticsService.shared.track(.deleteAccountConfirmed)
+
+        Task {
+            do {
+                if appState.auth.isSignedIn {
+                    try await appState.auth.deleteAccount()
+                }
+
+                appState.deleteAllLocalData()
+                subscriptionService?.clearLocalEntitlement()
+                AnalyticsService.shared.track(.deleteAccountSucceeded)
+                AnalyticsService.shared.reset()
+                SentryService.clearUser()
+
+                isDeletingAccount = false
+                dismiss()
+            } catch {
+                isDeletingAccount = false
+                deleteError = "We couldn\u{2019}t delete your account. Please try again."
+                AnalyticsService.shared.track(.deleteAccountFailed, properties: [
+                    "error": AnalyticsProperties.sanitizeMessage(error.localizedDescription)
+                ])
+            }
+        }
+    }
+
     // MARK: - About
 
     private var aboutSection: some View {
@@ -351,6 +472,28 @@ struct SettingsView: View {
                 Text("\(appVersion) (\(buildNumber))")
                     .font(.subheadline)
                     .foregroundStyle(.tertiary)
+            }
+
+            Link(destination: URL(string: "https://smartertraining.ai/privacy")!) {
+                HStack {
+                    Text("Privacy Policy")
+                        .font(.subheadline)
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Link(destination: URL(string: "https://smartertraining.ai/terms")!) {
+                HStack {
+                    Text("Terms of Service")
+                        .font(.subheadline)
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
         } footer: {
             Text("Training for people with real lives.")
@@ -421,6 +564,44 @@ struct SettingsView: View {
                 Button("+ Quality") { appState.debugSeedWorkout(type: .quality) }
             }
             .font(.caption)
+
+            if let subscriptionService {
+                Section("Subscription") {
+                    HStack {
+                        Text("Entitlement")
+                            .font(.subheadline)
+                        Spacer()
+                        Text(subscriptionService.entitlement.rawValue)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack {
+                        Text("Free spots left")
+                            .font(.subheadline)
+                        Spacer()
+                        Text(subscriptionService.isFreeFoundingAvailable ? "Available" : "Full")
+                            .font(.caption)
+                            .foregroundStyle(subscriptionService.isFreeFoundingAvailable ? .green : .red)
+                    }
+
+                    Button("Reset Entitlement", role: .destructive) {
+                        subscriptionService.debugResetEntitlement()
+                    }
+
+                    Button("Simulate Founder Claimed") {
+                        subscriptionService.debugSimulateFounderClaimed()
+                    }
+
+                    Button("Set Founder Count Full") {
+                        subscriptionService.debugSetFounderCountFull()
+                    }
+
+                    Button("Set Founder Count Available") {
+                        subscriptionService.debugSetFounderCountAvailable()
+                    }
+                }
+            }
 
             Section("Analytics") {
                 HStack {

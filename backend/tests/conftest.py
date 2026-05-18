@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.db import Base, get_session
 from app.main import app
-from app.models import TrainingRecord, Profile  # noqa: F401 -- ensure models are loaded
+from app.models import TrainingRecord, Profile, User  # noqa: F401 -- ensure models are loaded
 
 
 # Use aiosqlite for in-memory testing.
@@ -61,10 +61,13 @@ def mock_apple_auth():
     Patch verify_apple_identity_token to return a valid claims dict
     without making real HTTP calls to Apple.
     """
-    mock_result = {
-        "sub": "test_apple_id_123",
-        "email": "test@example.com",
-    }
+    mock_result = (
+        {
+            "sub": "test_apple_id_123",
+            "email": "test@example.com",
+        },
+        None,
+    )
     with patch(
         "app.routes.auth.verify_apple_identity_token",
         new_callable=AsyncMock,

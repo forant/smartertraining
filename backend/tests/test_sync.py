@@ -6,7 +6,7 @@ from uuid import uuid4
 
 async def _create_user_and_get_token(async_client, apple_sub="test_sync_user"):
     """Helper: create a user via mock Apple auth and return the JWT."""
-    mock_claims = {"sub": apple_sub, "email": f"{apple_sub}@example.com"}
+    mock_claims = ({"sub": apple_sub, "email": f"{apple_sub}@example.com"}, None)
     with patch(
         "app.routes.auth.verify_apple_identity_token",
         new_callable=AsyncMock,

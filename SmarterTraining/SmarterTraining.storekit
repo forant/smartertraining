@@ -1,0 +1,134 @@
+{
+  "identifier" : "C9A1E2F3-B4D5-4A6E-8F7C-1D2E3F4A5B6C",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+
+  ],
+  "settings" : {
+    "_applicationInternalID" : "0",
+    "_developerTeamID" : "",
+    "_lastSynchronizedDate" : 0,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Load Products"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Purchase"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Verification"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Store Sync"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Subscription Status"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "App Transaction"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Manage Subscriptions Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Offer Code Redeem Sheet"
+      },
+      {
+        "current" : null,
+        "enabled" : false,
+        "name" : "Refund Request Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "founding_access",
+      "localizations" : [
+
+      ],
+      "name" : "Founding Access",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "founding_monthly_001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Full coaching access. Support independent development.",
+              "displayName" : "Founding Supporter Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "smartertraining.founding.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Founding Supporter Monthly",
+          "subscriptionGroupID" : "founding_access",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "49.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "founding_annual_001",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Full coaching access. Best value. Lock in founding pricing.",
+              "displayName" : "Annual Founding Supporter",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "smartertraining.founding.annual",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Annual Founding Supporter",
+          "subscriptionGroupID" : "founding_access",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

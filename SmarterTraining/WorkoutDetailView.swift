@@ -259,9 +259,9 @@ struct WorkoutDetailView: View {
 
     private var typeColor: Color {
         switch entry.type {
-        case .recovery: .green
-        case .endurance: .blue
-        case .quality: .orange
+        case .recovery: Theme.Semantic.recovery
+        case .endurance: Theme.Semantic.endurance
+        case .quality: Theme.Semantic.quality
         }
     }
 
@@ -318,7 +318,7 @@ struct WorkoutDetailView: View {
         switch intensity {
         case "rest": .gray
         case "recovery": .green
-        case "endurance": .blue
+        case "endurance": Theme.Semantic.endurance
         case "quality": .orange
         default: .secondary
         }

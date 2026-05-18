@@ -22,10 +22,10 @@ struct UpcomingContextCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, Theme.Spacing.lg)
+        .padding(.vertical, Theme.Spacing.md)
+        .background(Theme.Surface.card)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
     }
 
     private var emptyState: some View {
@@ -280,12 +280,12 @@ struct UpcomingContextSheet: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(isSelected ? Color.accentColor.opacity(0.15) : Color(.secondarySystemGroupedBackground))
+            .background(isSelected ? Theme.Surface.selectedControl : Theme.Surface.card)
             .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                RoundedRectangle(cornerRadius: Theme.Radius.md)
+                    .stroke(isSelected ? Theme.Border.selected : .clear, lineWidth: Theme.Border.selectedWidth)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
         }
         .buttonStyle(.plain)
     }

@@ -377,7 +377,7 @@ struct WorkoutEditorView: View {
         switch level {
         case .neutral: .secondary
         case .encouragement: .green
-        case .notice: .blue
+        case .notice: Theme.Brand.primary
         case .caution: .orange
         case .strongDiscourage: .red
         }

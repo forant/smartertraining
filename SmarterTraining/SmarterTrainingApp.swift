@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct SmarterTrainingApp: App {
     @State private var appState = AppState()
+    @State private var subscriptionService = SubscriptionService()
 
     init() {
         SentryService.start()
@@ -10,8 +11,9 @@ struct SmarterTrainingApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(subscriptionService: subscriptionService)
                 .environment(appState)
+                .tint(Theme.Brand.primary)
                 .onAppear {
                     AnalyticsService.shared.track(.appOpened)
                     if let userId = appState.auth.userId {

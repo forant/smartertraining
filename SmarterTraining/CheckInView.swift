@@ -411,10 +411,10 @@ struct OptionButton: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 20)
-            .background(isSelected ? Color.accentColor.opacity(0.15) : Color(.systemGray6))
+            .background(isSelected ? Theme.Surface.selectedControl : Theme.Surface.unselectedControl)
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                    .stroke(isSelected ? Theme.Border.selected : .clear, lineWidth: Theme.Border.selectedWidth)
             )
             .clipShape(RoundedRectangle(cornerRadius: 16))
         }
@@ -440,10 +440,10 @@ struct ContextChip: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(isSelected ? Color.accentColor.opacity(0.15) : Color(.systemGray6))
+            .background(isSelected ? Theme.Surface.selectedControl : Theme.Surface.unselectedControl)
             .overlay(
                 Capsule()
-                    .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                    .stroke(isSelected ? Theme.Border.selected : .clear, lineWidth: Theme.Border.selectedWidth)
             )
             .clipShape(Capsule())
         }

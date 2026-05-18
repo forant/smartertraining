@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TodayView: View {
     @Environment(AppState.self) private var appState
+    var subscriptionService: SubscriptionService?
     @State private var showingCheckIn = false
     @State private var showingHistory = false
     @State private var showingRideSession = false
@@ -15,12 +16,19 @@ struct TodayView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: Theme.Spacing.lg) {
                     header
 
                     WorkoutHeroCard(
                         recommendation: appState.currentRecommendation,
                         isModified: editor?.isModified == true,
+                        hasCyclingSteps: hasCyclingSteps,
+                        onStart: {
+                            AnalyticsService.shared.track(.workoutStartTapped, properties: [
+                                "workout_type": appState.currentRecommendation.type.rawValue
+                            ])
+                            showingRideSession = true
+                        },
                         onEdit: hasCyclingSteps ? {
                             ensureEditor()
                             showingEditor = true
@@ -30,10 +38,10 @@ struct TodayView: View {
                     .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.type)
                     .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.title)
 
-                    startWorkoutButton
-
-                    coachCallout
+                    coachExplanationCard
                         .animation(.easeInOut(duration: 0.3), value: coachExplanationText)
+
+                    WorkoutBreakdownCard(steps: appState.currentRecommendation.steps)
 
                     WorkoutFeedbackCard(
                         selectedFeedback: appState.todayFeedback,
@@ -59,7 +67,7 @@ struct TodayView: View {
                 }
                 .padding()
             }
-            .background(Color(.systemGroupedBackground))
+            .background(Theme.Surface.background)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -77,7 +85,7 @@ struct TodayView: View {
                 HistoryView()
             }
             .sheet(isPresented: $showingSettings) {
-                SettingsView()
+                SettingsView(subscriptionService: subscriptionService)
             }
             .sheet(isPresented: $showingEditor) {
                 if let editor {
@@ -113,13 +121,13 @@ struct TodayView: View {
     // MARK: - Header
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             Text("Today")
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
             Text(appState.latestCheckIn != nil
-                 ? "Here's the right move for today"
+                 ? "Here\u{2019}s the right move for today"
                  : "Your plan is ready")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -127,7 +135,7 @@ struct TodayView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - Coach Callout
+    // MARK: - Coach Explanation
 
     private var isAwaitingAI: Bool {
         aiCoach.isLoading || (!aiCoach.hasAttemptedFetch && appState.auth.isSignedIn)
@@ -140,39 +148,41 @@ struct TodayView: View {
         return appState.currentRecommendation.reason
     }
 
-    private var coachCallout: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "brain.head.profile")
-                .font(.subheadline)
-                .foregroundStyle(.tint)
-                .frame(width: 22)
+    private var coachExplanationCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text("WHY THIS")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(Theme.Brand.primary)
+                .tracking(0.5)
 
-            VStack(alignment: .leading, spacing: 4) {
-                if isAwaitingAI {
-                    Text("Thinking about today\u{2026}")
-                        .font(.subheadline)
+            if isAwaitingAI {
+                Text("Thinking about today\u{2026}")
+                    .font(.subheadline)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(coachExplanationText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let ai = aiCoach.explanation, !ai.isFallback, let tomorrow = ai.tomorrowImplication {
+                    Text(tomorrow)
+                        .font(.caption)
                         .foregroundStyle(.tertiary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text(coachExplanationText)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    if let ai = aiCoach.explanation, !ai.isFallback, let tomorrow = ai.tomorrowImplication {
-                        Text(tomorrow)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .italic()
-                    }
+                        .italic()
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(Color.accentColor.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(Theme.Spacing.lg)
+        .background(Theme.Surface.card)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg)
+                .stroke(Theme.Border.subtle, lineWidth: Theme.Border.width)
+        )
     }
 
     private func fetchAIExplanation() async {
@@ -191,30 +201,10 @@ struct TodayView: View {
         )
     }
 
-    // MARK: - Start Workout
+    // MARK: - Helpers
 
     private var hasCyclingSteps: Bool {
         appState.currentRecommendation.steps.contains { $0.modality == .cycling || $0.modality == .recovery }
-    }
-
-    @ViewBuilder
-    private var startWorkoutButton: some View {
-        if hasCyclingSteps {
-            Button {
-                AnalyticsService.shared.track(.workoutStartTapped, properties: [
-                    "workout_type": appState.currentRecommendation.type.rawValue
-                ])
-                showingRideSession = true
-            } label: {
-                Label("Start Workout", systemImage: "figure.indoor.cycle")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .tint(.green)
-        }
     }
 
     private func ensureEditor() {
@@ -244,9 +234,8 @@ struct TodayView: View {
                 .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
-        .padding(.top, 4)
+        .padding(.top, Theme.Spacing.xs)
     }
-
 }
 
 // MARK: - Workout Hero Card
@@ -254,60 +243,104 @@ struct TodayView: View {
 struct WorkoutHeroCard: View {
     let recommendation: WorkoutRecommendation
     var isModified: Bool = false
+    var hasCyclingSteps: Bool = false
+    var onStart: (() -> Void)? = nil
     var onEdit: (() -> Void)? = nil
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(recommendation.title)
-                        .font(.title)
-                        .fontWeight(.bold)
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            HStack {
+                Text("FITS YOUR DAY")
+                    .font(.caption2)
+                    .fontWeight(.bold)
+                    .foregroundStyle(Theme.TextStyle.onBrandSecondary)
+                    .tracking(0.8)
 
-                    Text(recommendation.summary)
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
                 Spacer()
+
                 if let onEdit {
                     Button(action: onEdit) {
                         Image(systemName: "slider.horizontal.3")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                            .foregroundStyle(Theme.TextStyle.onBrandSecondary)
                     }
                     .buttonStyle(.plain)
                 }
             }
 
+            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                Text(recommendation.title)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundStyle(Theme.TextStyle.onBrand)
+
+                Text(recommendation.summary)
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.TextStyle.onBrandSecondary)
+            }
+
             if isModified {
                 Label("Modified from recommendation", systemImage: "pencil")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.TextStyle.onBrandSecondary)
             }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Workout")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 4)
-
-                ForEach(Array(recommendation.steps.enumerated()), id: \.offset) { index, step in
-                    WorkoutStepRow(step: step)
-
-                    if index < recommendation.steps.count - 1 {
-                        Divider()
-                            .padding(.leading, 40)
+            if hasCyclingSteps, let onStart {
+                Button(action: onStart) {
+                    HStack(spacing: Theme.Spacing.sm) {
+                        Image(systemName: "figure.indoor.cycle")
+                            .font(.subheadline)
+                        Text("Start Workout")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
                     }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, Theme.Spacing.md)
+                    .background(.white)
+                    .foregroundStyle(Theme.Brand.primary)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Spacing.xl)
+        .background(Theme.Brand.heroGradient)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.xl))
+    }
+}
+
+// MARK: - Workout Breakdown Card
+
+struct WorkoutBreakdownCard: View {
+    let steps: [WorkoutStep]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text("WORKOUT")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.tertiary)
+                .tracking(0.5)
+                .padding(.bottom, Theme.Spacing.xs)
+
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                WorkoutStepRow(step: step)
+
+                if index < steps.count - 1 {
+                    Divider()
+                        .padding(.leading, 40)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(24)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
+        .padding(Theme.Spacing.lg)
+        .background(Theme.Surface.card)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg)
+                .stroke(Theme.Border.subtle, lineWidth: Theme.Border.width)
+        )
     }
 }
 
@@ -317,11 +350,11 @@ struct WorkoutStepRow: View {
     let step: WorkoutStep
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
             Text(step.durationText)
                 .font(.subheadline)
                 .fontWeight(.medium)
-                .foregroundStyle(.tint)
+                .foregroundStyle(Theme.Brand.primary)
                 .frame(width: 70, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -362,10 +395,14 @@ struct OptionalExtrasCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal, Theme.Spacing.lg)
+        .padding(.vertical, Theme.Spacing.md)
+        .background(Theme.Surface.card)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.md)
+                .stroke(Theme.Border.subtle, lineWidth: Theme.Border.width)
+        )
     }
 }
 
@@ -379,7 +416,7 @@ struct CheckInSummaryCard: View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
-                    Text("Today's check-in")
+                    Text("Today\u{2019}s check-in")
                         .font(.caption)
                         .fontWeight(.medium)
                         .foregroundStyle(.tertiary)
@@ -405,10 +442,14 @@ struct CheckInSummaryCard: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.vertical, Theme.Spacing.md)
+            .background(Theme.Surface.card)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.md)
+                    .stroke(Theme.Border.subtle, lineWidth: Theme.Border.width)
+            )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Today's check-in: \(checkIn.overallFeel) feeling, \(checkIn.legs) legs, \(checkIn.motivation) motivation, \(checkIn.timeAvailable) minutes")
@@ -422,11 +463,66 @@ struct WorkoutFeedbackCard: View {
     let selectedFeedback: WorkoutFeedback?
     let onSelect: (WorkoutFeedback) -> Void
 
+    @State private var isExpanded = true
+
     private let options: [WorkoutFeedback] = [.easy, .right, .hard, .tooMuch]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(selectedFeedback == nil ? "How did this feel?" : "Thanks for the feedback")
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            if let selected = selectedFeedback, !isExpanded {
+                collapsedState(selected)
+            } else {
+                expandedState
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(Theme.Spacing.lg)
+        .background(Theme.Surface.card)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.lg))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.lg)
+                .stroke(Theme.Border.subtle, lineWidth: Theme.Border.width)
+        )
+        .animation(.easeInOut(duration: 0.25), value: selectedFeedback)
+        .animation(.easeInOut(duration: 0.25), value: isExpanded)
+        .onChange(of: selectedFeedback) {
+            if selectedFeedback != nil {
+                isExpanded = false
+            }
+        }
+    }
+
+    private func collapsedState(_ feedback: WorkoutFeedback) -> some View {
+        HStack(spacing: Theme.Spacing.md) {
+            Text(feedback.emoji)
+                .font(.title3)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(collapsedLabel(feedback))
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text("Thanks for the feedback")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            Button {
+                isExpanded = true
+            } label: {
+                Text("Change")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(Theme.Brand.primary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var expandedState: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            Text("How did this feel?")
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
@@ -446,21 +542,26 @@ struct WorkoutFeedbackCard: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .background(isSelected ? Color.accentColor.opacity(0.15) : Color(.systemGray6))
+                        .background(isSelected ? Theme.Surface.selectedControl : Theme.Surface.unselectedControl)
                         .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                            RoundedRectangle(cornerRadius: Theme.Radius.md)
+                                .stroke(isSelected ? Theme.Border.selected : .clear, lineWidth: Theme.Border.selectedWidth)
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.md))
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func collapsedLabel(_ feedback: WorkoutFeedback) -> String {
+        switch feedback {
+        case .easy: "This was easy"
+        case .right: "This was just right"
+        case .hard: "This was hard"
+        case .tooMuch: "This was too much"
+        }
     }
 }
 
@@ -519,7 +620,7 @@ struct HistoryRowView: View {
         HStack(spacing: 10) {
             Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
                 .font(.caption)
-                .foregroundStyle(isCompleted ? Color.green : Color(.quaternaryLabel))
+                .foregroundStyle(isCompleted ? Theme.Semantic.recovery : Color(.quaternaryLabel))
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.title)

@@ -55,7 +55,7 @@ async def test_apple_auth_invalid_token(async_client):
     with patch(
         "app.routes.auth.verify_apple_identity_token",
         new_callable=AsyncMock,
-        return_value=None,
+        return_value=(None, "Invalid token"),
     ):
         response = await async_client.post(
             "/v1/auth/apple",
@@ -68,10 +68,13 @@ async def test_apple_auth_invalid_token(async_client):
 async def test_user_a_cannot_access_user_b(async_client):
     """Create two users; sync records for user A; verify user B sync returns empty."""
     # Create user A.
-    mock_a = {
-        "sub": "apple_user_a",
-        "email": "a@example.com",
-    }
+    mock_a = (
+        {
+            "sub": "apple_user_a",
+            "email": "a@example.com",
+        },
+        None,
+    )
     with patch(
         "app.routes.auth.verify_apple_identity_token",
         new_callable=AsyncMock,
@@ -84,10 +87,13 @@ async def test_user_a_cannot_access_user_b(async_client):
     token_a = resp_a.json()["access_token"]
 
     # Create user B.
-    mock_b = {
-        "sub": "apple_user_b",
-        "email": "b@example.com",
-    }
+    mock_b = (
+        {
+            "sub": "apple_user_b",
+            "email": "b@example.com",
+        },
+        None,
+    )
     with patch(
         "app.routes.auth.verify_apple_identity_token",
         new_callable=AsyncMock,

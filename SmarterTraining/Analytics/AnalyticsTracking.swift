@@ -26,4 +26,5 @@ enum ErrorCategory: String, Sendable {
     case aiCoach = "ai_coach"
     case persistence
     case notification
+    case subscription
 }

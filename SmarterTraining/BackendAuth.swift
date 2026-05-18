@@ -31,9 +31,17 @@ final class BackendAuthService {
             throw AuthError.missingToken
         }
 
+        let authorizationCode: String? = credential.authorizationCode.flatMap {
+            String(data: $0, encoding: .utf8)
+        }
+
         AnalyticsService.shared.track(.siwaStarted)
         do {
-            try await exchangeToken(identityToken: tokenString, fullName: credential.fullName)
+            try await exchangeToken(
+                identityToken: tokenString,
+                fullName: credential.fullName,
+                authorizationCode: authorizationCode
+            )
             AnalyticsService.shared.track(.siwaSucceeded)
             if let userId {
                 AnalyticsService.shared.identify(userId: userId)
@@ -47,6 +55,27 @@ final class BackendAuthService {
         }
     }
 
+    func deleteAccount() async throws {
+        guard let jwt else {
+            signOut()
+            return
+        }
+
+        let url = URL(string: "\(Self.baseURL)/v1/account")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+
+        if let httpResponse = response as? HTTPURLResponse,
+           httpResponse.statusCode != 200 && httpResponse.statusCode != 204 {
+            throw AuthError.serverError("Account deletion failed (\(httpResponse.statusCode))")
+        }
+
+        signOut()
+    }
+
     func signOut() {
         KeychainHelper.delete(forKey: Keys.jwt, service: Self.keychainService)
         KeychainHelper.delete(forKey: Keys.userId, service: Self.keychainService)
@@ -57,7 +86,7 @@ final class BackendAuthService {
         SentryService.clearUser()
     }
 
-    private func exchangeToken(identityToken: String, fullName: PersonNameComponents?) async throws {
+    private func exchangeToken(identityToken: String, fullName: PersonNameComponents?, authorizationCode: String? = nil) async throws {
         var body: [String: Any] = ["identity_token": identityToken]
         if let name = fullName {
             var nameParts: [String] = []
@@ -66,6 +95,9 @@ final class BackendAuthService {
             if !nameParts.isEmpty {
                 body["full_name"] = nameParts.joined(separator: " ")
             }
+        }
+        if let authorizationCode {
+            body["authorization_code"] = authorizationCode
         }
 
         let url = URL(string: "\(Self.baseURL)/v1/auth/apple")!

@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 
-from app.routes.sync import get_current_user_id
+from app.auth import get_current_user_id
 from app.schemas import (
     CoachExplanationRequest,
     CoachExplanationResponse,

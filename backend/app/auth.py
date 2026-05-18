@@ -3,6 +3,7 @@ from typing import Optional, Tuple
 from uuid import UUID
 
 import jwt
+from fastapi import Header, HTTPException, status
 
 from app.config import settings
 
@@ -30,3 +31,22 @@ def verify_access_token(token: str) -> Optional[UUID]:
         return UUID(payload["sub"])
     except (jwt.InvalidTokenError, KeyError, ValueError):
         return None
+
+
+async def get_current_user_id(
+    authorization: str = Header(...),
+) -> UUID:
+    """Extract and verify JWT from the Authorization header."""
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header",
+        )
+    token = authorization[len("Bearer "):]
+    user_id = verify_access_token(token)
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+    return user_id

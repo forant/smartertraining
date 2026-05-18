@@ -1,11 +1,11 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import verify_access_token
+from app.auth import get_current_user_id
 from app.db import get_session
 from app.models import TrainingRecord
 from app.schemas import SyncRecordOut, SyncRequest, SyncResponse
@@ -18,25 +18,6 @@ def _ensure_aware(dt: datetime) -> datetime:
     return dt
 
 router = APIRouter(prefix="/v1", tags=["sync"])
-
-
-async def get_current_user_id(
-    authorization: str = Header(...),
-) -> UUID:
-    """Extract and verify JWT from the Authorization header."""
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authorization header",
-        )
-    token = authorization[len("Bearer "):]
-    user_id = verify_access_token(token)
-    if user_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
-    return user_id
 
 
 @router.post("/sync", response_model=SyncResponse)

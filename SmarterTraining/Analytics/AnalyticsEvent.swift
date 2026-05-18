@@ -106,6 +106,25 @@ enum AnalyticsEvent: String, Sendable {
     case notificationPermissionGranted = "notification_permission_granted"
     case notificationPermissionDenied = "notification_permission_denied"
     case coachingNotificationScheduled = "coaching_notification_scheduled"
+
+    // MARK: - Subscription & Paywall
+    case paywallViewed = "paywall_viewed"
+    case freeFounderSelected = "free_founder_selected"
+    case purchaseMonthlyTapped = "purchase_monthly_tapped"
+    case purchaseAnnualTapped = "purchase_annual_tapped"
+    case purchaseSucceeded = "purchase_succeeded"
+    case purchaseCancelled = "purchase_cancelled"
+    case purchaseFailed = "purchase_failed"
+    case restoreTapped = "restore_tapped"
+    case restoreSucceeded = "restore_succeeded"
+    case restoreFailed = "restore_failed"
+    case entitlementResolved = "entitlement_resolved"
+
+    // MARK: - Account Deletion
+    case deleteAccountTapped = "delete_account_tapped"
+    case deleteAccountConfirmed = "delete_account_confirmed"
+    case deleteAccountSucceeded = "delete_account_succeeded"
+    case deleteAccountFailed = "delete_account_failed"
 }
 
 // MARK: - Property Helpers

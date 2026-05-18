@@ -48,8 +48,8 @@ final class CoachingNotificationManager {
             "day2_intensity": intent.day2RecommendedIntensity.rawValue
         ])
 
-        let day1Fire = intent.day1Date.addingTimeInterval(-2 * 3600)
-        let day2Fire = intent.day2Date.addingTimeInterval(-2 * 3600)
+        let day1Fire = intent.generatedAt.addingTimeInterval(22 * 3600)
+        let day2Fire = intent.generatedAt.addingTimeInterval(46 * 3600)
 
         scheduleIfFuture(
             id: day1Prefix + intent.id.uuidString,

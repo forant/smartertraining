@@ -324,6 +324,13 @@ final class LocalStore {
         try? data.write(to: syncStatusURL, options: .atomic)
     }
 
+    // MARK: - Full Data Deletion
+
+    func deleteAllData() {
+        try? FileManager.default.removeItem(at: baseURL)
+        try? FileManager.default.createDirectory(at: ridesURL, withIntermediateDirectories: true)
+    }
+
     // MARK: - Private
 
     private func rideURL(for id: UUID) -> URL {

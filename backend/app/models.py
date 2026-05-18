@@ -25,6 +25,9 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
+    apple_refresh_token: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
 
 
 class Profile(Base):

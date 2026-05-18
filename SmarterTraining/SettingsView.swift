@@ -112,18 +112,13 @@ struct SettingsView: View {
     private var signedInContent: some View {
         Group {
             HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text("Signed in")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                    }
-                    syncSummaryText
+                HStack(spacing: 6) {
+                    Text("Signed in")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Image(systemName: "checkmark.circle.fill")
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.green)
                 }
                 Spacer()
                 if case .syncing = appState.sync.status {
@@ -132,33 +127,10 @@ struct SettingsView: View {
                 }
             }
 
-            Button("Sync now") {
-                appState.triggerSync()
-            }
-
             Button("Sign out", role: .destructive) {
                 appState.auth.signOut()
                 appState.sync.updateAuthStatus()
             }
-        }
-    }
-
-    @ViewBuilder
-    private var syncSummaryText: some View {
-        switch appState.sync.status {
-        case .synced:
-            if let lastSynced = appState.sync.lastSyncedAt {
-                Text("Synced \(lastSynced.formatted(.relative(presentation: .named)))")
-            } else {
-                Text("Synced")
-            }
-        case .syncing:
-            Text("Syncing\u{2026}")
-        case .error(let msg):
-            Text(msg)
-                .foregroundStyle(.red)
-        default:
-            Text("Ready to sync")
         }
     }
 

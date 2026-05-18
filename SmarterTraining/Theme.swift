@@ -49,7 +49,11 @@ enum Theme {
                 : .white
         })
         static let coachCallout = card
-        static let selectedControl = Brand.softTint
+        static let selectedControl = Color(UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.208, green: 0.286, blue: 0.659, alpha: 0.25)
+                : UIColor(red: 0.933, green: 0.945, blue: 1.0, alpha: 1)
+        })
         static let unselectedControl = Color(UIColor { traits in
             traits.userInterfaceStyle == .dark
                 ? .tertiarySystemGroupedBackground

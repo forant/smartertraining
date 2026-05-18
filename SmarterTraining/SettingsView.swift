@@ -180,9 +180,11 @@ struct SettingsView: View {
                         }
                     }
                 case .failure(let error):
-                    if (error as? ASAuthorizationError)?.code != .canceled {
-                        signInError = error.localizedDescription
+                    if let authError = error as? ASAuthorizationError,
+                       authError.code == .canceled || authError.code == .unknown {
+                        return
                     }
+                    signInError = error.localizedDescription
                 }
             }
             .frame(height: 44)

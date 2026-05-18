@@ -13,6 +13,10 @@ struct WorkoutDetailView: View {
                     sessionStatsSection(ride)
                 }
 
+                if let ride, !ride.samples.isEmpty {
+                    WorkoutChartsSection(workout: ride)
+                }
+
                 if let reflection = ride?.reflection {
                     reflectionSection(reflection)
                 }

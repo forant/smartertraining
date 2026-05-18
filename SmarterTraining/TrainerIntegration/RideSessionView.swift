@@ -787,6 +787,9 @@ struct RideSessionView: View {
 
                 if let workout = completedWorkout {
                     PostWorkoutSummaryCard(workout: workout)
+                    if !workout.samples.isEmpty {
+                        WorkoutChartsSection(workout: workout)
+                    }
                 }
 
                 if let reflection = reflectionService.reflection {

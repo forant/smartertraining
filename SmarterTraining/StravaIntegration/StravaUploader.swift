@@ -31,7 +31,8 @@ final class StravaUploader {
         do {
             let token = try await auth.validAccessToken()
             let tcxData = TCXGenerator.generate(from: workout)
-            let uploadId = try await postUpload(tcxData: tcxData, title: workout.title, token: token)
+            let description = buildDescription(for: workout)
+            let uploadId = try await postUpload(tcxData: tcxData, title: workout.title, description: description, token: token)
             state = .processing
             let activityId = try await pollUploadStatus(uploadId: uploadId, token: token)
             state = .success(activityId: activityId)
@@ -55,7 +56,7 @@ final class StravaUploader {
 
     // MARK: - Upload
 
-    private func postUpload(tcxData: Data, title: String, token: String) async throws -> Int64 {
+    private func postUpload(tcxData: Data, title: String, description: String, token: String) async throws -> Int64 {
         let boundary = UUID().uuidString
         var request = URLRequest(url: URL(string: StravaConfig.uploadURL)!)
         request.httpMethod = "POST"
@@ -64,7 +65,8 @@ final class StravaUploader {
         request.httpBody = buildMultipartBody(
             boundary: boundary,
             tcxData: tcxData,
-            title: title
+            title: title,
+            description: description
         )
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -153,7 +155,7 @@ final class StravaUploader {
 
     // MARK: - Multipart Body
 
-    private func buildMultipartBody(boundary: String, tcxData: Data, title: String) -> Data {
+    private func buildMultipartBody(boundary: String, tcxData: Data, title: String, description: String) -> Data {
         var body = Data()
 
         func appendField(_ name: String, value: String) {
@@ -171,11 +173,24 @@ final class StravaUploader {
 
         appendField("data_type", value: "tcx")
         appendField("name", value: title)
+        appendField("description", value: description)
         appendField("trainer", value: "1")
         appendField("sport_type", value: "VirtualRide")
 
         body.append("--\(boundary)--\r\n")
         return body
+    }
+
+    // MARK: - Description
+
+    private static let attribution = "Finished another workout designed by SmarterTraining"
+
+    private func buildDescription(for workout: CompletedWorkout) -> String {
+        let note = workout.postWorkoutNote?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if note.isEmpty {
+            return Self.attribution
+        }
+        return "\(note)\n\n\(Self.attribution)"
     }
 }
 

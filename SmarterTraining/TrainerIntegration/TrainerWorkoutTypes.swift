@@ -22,14 +22,22 @@ enum WorkoutConverter {
 
     static func convert(recommendation: WorkoutRecommendation, ftp: Int?) -> [TrainerWorkoutStep] {
         recommendation.steps.flatMap { step in
-            convertStep(step, workoutType: recommendation.type, ftp: ftp)
+            convertStep(step, workoutType: recommendation.type, qualitySubtype: recommendation.qualitySubtype, ftp: ftp)
         }
     }
 
-    private static func convertStep(_ step: WorkoutStep, workoutType: WorkoutType, ftp: Int?) -> [TrainerWorkoutStep] {
+    private static func convertStep(_ step: WorkoutStep, workoutType: WorkoutType, qualitySubtype: QualitySubtype?, ftp: Int?) -> [TrainerWorkoutStep] {
         let intervalParse = parseIntervalDuration(step.durationText)
 
         if let interval = intervalParse {
+            if qualitySubtype == .overUnders && step.role == .primary {
+                return expandOverUnders(
+                    step: step,
+                    reps: interval.reps,
+                    setSeconds: interval.workSeconds,
+                    ftp: ftp
+                )
+            }
             return expandIntervals(
                 step: step,
                 reps: interval.reps,
@@ -85,6 +93,52 @@ enum WorkoutConverter {
         return steps
     }
 
+    /// Expands an over/under set into alternating supra-threshold and sub-threshold sub-steps.
+    /// Default pattern: 2 min @ 105% FTP / 1 min @ 88% FTP, repeating to fill the set duration.
+    private static func expandOverUnders(
+        step: WorkoutStep,
+        reps: Int,
+        setSeconds: TimeInterval,
+        ftp: Int?
+    ) -> [TrainerWorkoutStep] {
+        let overSeconds: TimeInterval = 120
+        let underSeconds: TimeInterval = 60
+        let cycleSeconds = overSeconds + underSeconds
+        let cyclesPerSet = max(1, Int(setSeconds / cycleSeconds))
+
+        let overWatts = ftp.map { Int(Double($0) * 1.05) } ?? 220
+        let underWatts = ftp.map { Int(Double($0) * 0.88) } ?? 170
+        let restWatts = ftp.map { Int(Double($0) * 0.55) } ?? 100
+        let restSeconds = parseRestDuration(step.targetText)
+
+        var steps: [TrainerWorkoutStep] = []
+        for set in 1...reps {
+            for _ in 1...cyclesPerSet {
+                steps.append(TrainerWorkoutStep(
+                    name: "Over (Set \(set) of \(reps))",
+                    duration: overSeconds,
+                    targetPower: overWatts,
+                    role: .primary
+                ))
+                steps.append(TrainerWorkoutStep(
+                    name: "Under (Set \(set) of \(reps))",
+                    duration: underSeconds,
+                    targetPower: underWatts,
+                    role: .primary
+                ))
+            }
+            if set < reps {
+                steps.append(TrainerWorkoutStep(
+                    name: "Recovery",
+                    duration: restSeconds,
+                    targetPower: restWatts,
+                    role: .cooldown
+                ))
+            }
+        }
+        return steps
+    }
+
     // MARK: - Duration parsing
 
     // "3 x 4 min" -> (reps: 3, workSeconds: 240)
@@ -123,13 +177,19 @@ enum WorkoutConverter {
     }
 
     // "... with 2 min easy between reps" -> 120
+    // "..., 4 min easy between sets" -> 240
     private static func parseRestDuration(_ text: String) -> TimeInterval {
-        let pattern = #"with\s+(\d+)\s*min"#
-        if let match = text.range(of: pattern, options: .regularExpression) {
-            let matched = String(text[match])
-            let numbers = matched.components(separatedBy: .decimalDigits.inverted).filter { !$0.isEmpty }
-            if let mins = numbers.first.flatMap(Int.init) {
-                return TimeInterval(mins * 60)
+        let patterns = [
+            #"with\s+(\d+)\s*min"#,
+            #"(\d+)\s*min\s+easy\s+between"#
+        ]
+        for pattern in patterns {
+            if let match = text.range(of: pattern, options: .regularExpression) {
+                let matched = String(text[match])
+                let numbers = matched.components(separatedBy: .decimalDigits.inverted).filter { !$0.isEmpty }
+                if let mins = numbers.first.flatMap(Int.init) {
+                    return TimeInterval(mins * 60)
+                }
             }
         }
         return 120 // fallback: 2 min

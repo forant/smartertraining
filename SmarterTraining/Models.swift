@@ -129,6 +129,36 @@ enum WorkoutType: String, Codable {
     }
 }
 
+enum QualitySubtype: String, Codable, Equatable, CaseIterable {
+    case vo2
+    case threshold
+    case muscularEndurance
+    case tempo
+    case overUnders
+
+    var label: String {
+        switch self {
+        case .vo2: "VO2 Max"
+        case .threshold: "Threshold"
+        case .muscularEndurance: "Muscular Endurance"
+        case .tempo: "Tempo"
+        case .overUnders: "Over/Unders"
+        }
+    }
+
+    /// Relative fatigue cost on a 1–3 scale used to shape next-day intent.
+    /// VO2 and Threshold are the heaviest; Tempo is the lightest quality option.
+    var recoveryCost: Int {
+        switch self {
+        case .vo2: 3
+        case .threshold: 3
+        case .overUnders: 2
+        case .muscularEndurance: 2
+        case .tempo: 1
+        }
+    }
+}
+
 enum WorkoutStepRole: String, Codable {
     case warmup, primary, cooldown, accessory
 }
@@ -147,11 +177,30 @@ struct WorkoutStep: Codable {
 
 struct WorkoutRecommendation: Codable {
     var type: WorkoutType
+    var qualitySubtype: QualitySubtype?
     var title: String
     var summary: String
     var reason: String
     var steps: [WorkoutStep]
     var optionalExtras: [String]
+
+    init(
+        type: WorkoutType,
+        qualitySubtype: QualitySubtype? = nil,
+        title: String,
+        summary: String,
+        reason: String,
+        steps: [WorkoutStep],
+        optionalExtras: [String]
+    ) {
+        self.type = type
+        self.qualitySubtype = qualitySubtype
+        self.title = title
+        self.summary = summary
+        self.reason = reason
+        self.steps = steps
+        self.optionalExtras = optionalExtras
+    }
 }
 
 enum WorkoutFeedback: String, Codable {
@@ -187,6 +236,7 @@ struct WorkoutHistoryEntry: Codable, Identifiable {
     var checkIn: CheckIn?
     var feedback: WorkoutFeedback?
     var feedbackAt: Date?
+    var qualitySubtype: QualitySubtype?
 
     init(
         id: UUID = UUID(),
@@ -195,7 +245,8 @@ struct WorkoutHistoryEntry: Codable, Identifiable {
         type: WorkoutType,
         checkIn: CheckIn? = nil,
         feedback: WorkoutFeedback? = nil,
-        feedbackAt: Date? = nil
+        feedbackAt: Date? = nil,
+        qualitySubtype: QualitySubtype? = nil
     ) {
         self.id = id
         self.date = date
@@ -204,6 +255,7 @@ struct WorkoutHistoryEntry: Codable, Identifiable {
         self.checkIn = checkIn
         self.feedback = feedback
         self.feedbackAt = feedbackAt
+        self.qualitySubtype = qualitySubtype
     }
 
     init(from decoder: Decoder) throws {
@@ -215,6 +267,7 @@ struct WorkoutHistoryEntry: Codable, Identifiable {
         checkIn = try container.decodeIfPresent(CheckIn.self, forKey: .checkIn)
         feedback = try container.decodeIfPresent(WorkoutFeedback.self, forKey: .feedback)
         feedbackAt = try container.decodeIfPresent(Date.self, forKey: .feedbackAt)
+        qualitySubtype = try container.decodeIfPresent(QualitySubtype.self, forKey: .qualitySubtype)
     }
 }
 
@@ -252,6 +305,9 @@ final class AppState {
     var lastCheckInDate: Date?
     var todayFeedback: WorkoutFeedback?
     private(set) var recentHistory: [WorkoutHistoryEntry] = []
+    private(set) var coachNotes: CoachNotes = .empty
+    private(set) var progressionState: ProgressionState = .empty
+    private(set) var trainingApproach: TrainingApproach = .default
 
     private(set) var upcomingContextEvents: [UpcomingContextEvent] = []
 
@@ -266,6 +322,9 @@ final class AppState {
         static let checkInDate = "lastCheckInDate"
         static let onboardingComplete = "hasCompletedOnboarding"
         static let userProfile = "userProfile"
+        static let coachNotes = "coachNotes"
+        static let progressionState = "progressionState"
+        static let trainingApproach = "trainingApproach"
     }
 
     init() {
@@ -282,6 +341,18 @@ final class AppState {
         }
         upcomingContextEvents = store.loadUpcomingContext().filter { !$0.isExpired }
         recentHistory = store.loadWorkouts().suffix(Self.maxHistoryCount)
+        if let notesData = defaults.data(forKey: Keys.coachNotes),
+           let saved = try? JSONDecoder().decode(CoachNotes.self, from: notesData) {
+            coachNotes = saved
+        }
+        if let progData = defaults.data(forKey: Keys.progressionState),
+           let saved = try? JSONDecoder().decode(ProgressionState.self, from: progData) {
+            progressionState = saved
+        }
+        if let approachRaw = defaults.string(forKey: Keys.trainingApproach),
+           let saved = TrainingApproach(rawValue: approachRaw) {
+            trainingApproach = saved
+        }
         if let last = recentHistory.last,
            Calendar.current.isDateInToday(last.date) {
             todayFeedback = last.feedback
@@ -332,12 +403,90 @@ final class AppState {
         AnalyticsService.shared.track(.workoutFeedbackSubmitted, properties: [
             "feedback": feedback.rawValue
         ])
+        applyProgressionUpdate(for: feedback)
         triggerSync()
+    }
+
+    /// Update progression state based on the just-submitted feedback. Reads the
+    /// latest history entry to know which subtype was performed, and the matching
+    /// ride to fold in coach-reflection signal when available.
+    private func applyProgressionUpdate(for feedback: WorkoutFeedback) {
+        guard let entry = recentHistory.last,
+              entry.type == .quality,
+              let subtype = entry.qualitySubtype else { return }
+
+        let ride = store.finishedRides().first {
+            Calendar.current.isDate($0.startDate, inSameDayAs: entry.date)
+        }
+        let reflection = ride?.coachReflection
+        guard let signal = ProgressionSignalClassifier.signal(feedback: feedback, reflection: reflection) else { return }
+
+        let previousTier = progressionState.tier(for: subtype)
+        let updated = progressionState.applying(signal: signal, to: subtype, approach: trainingApproach)
+        progressionState = updated
+        persistProgressionState()
+
+        let newTier = updated.tier(for: subtype)
+        if newTier != previousTier {
+            AnalyticsService.shared.track(.progressionTierChanged, properties: [
+                "subtype": subtype.rawValue,
+                "from_tier": previousTier.rawValue,
+                "to_tier": newTier.rawValue,
+                "signal": String(describing: signal),
+                "training_approach": trainingApproach.rawValue
+            ])
+        }
+    }
+
+    private func persistProgressionState() {
+        if let data = try? JSONEncoder().encode(progressionState) {
+            defaults.set(data, forKey: Keys.progressionState)
+        }
     }
 
     func triggerSync() {
         guard auth.isSignedIn else { return }
         Task { await sync.sync() }
+    }
+
+    // MARK: - Training Approach
+
+    /// Updates the coaching approach. Like coach notes, this is *evolving context*
+    /// — it does not retroactively rewrite today's plan. It takes effect at the next
+    /// check-in and on every subsequent progression update.
+    func setTrainingApproach(_ approach: TrainingApproach) {
+        guard approach != trainingApproach else { return }
+        let previous = trainingApproach
+        trainingApproach = approach
+        defaults.set(approach.rawValue, forKey: Keys.trainingApproach)
+        AnalyticsService.shared.track(.trainingApproachChanged, properties: [
+            "training_approach": approach.rawValue,
+            "previous_approach": previous.rawValue
+        ])
+        triggerSync()
+    }
+
+    // MARK: - Coach Notes
+
+    /// Coach Notes are evolving context. Edits do NOT rewrite today's plan — today
+    /// was already shaped by today's check-in. Notes take effect at the next check-in
+    /// so the user never sees their hero card change under them mid-day.
+    func setCoachNotes(_ notes: CoachNotes) {
+        var updated = notes
+        if !updated.isEmpty {
+            updated.updatedAt = Date()
+        }
+        coachNotes = updated
+        if updated.isEmpty {
+            defaults.removeObject(forKey: Keys.coachNotes)
+        } else if let data = try? JSONEncoder().encode(updated) {
+            defaults.set(data, forKey: Keys.coachNotes)
+        }
+        AnalyticsService.shared.track(.coachNotesUpdated, properties: [
+            "has_note": !updated.freeformNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            "tag_count": updated.tags.count
+        ])
+        triggerSync()
     }
 
     // MARK: - Upcoming Context
@@ -382,11 +531,17 @@ final class AppState {
         currentRecommendation = .preview
         recentHistory.removeAll()
         upcomingContextEvents.removeAll()
+        coachNotes = .empty
+        progressionState = .empty
+        trainingApproach = .default
 
         defaults.removeObject(forKey: Keys.onboardingComplete)
         defaults.removeObject(forKey: Keys.userProfile)
         defaults.removeObject(forKey: Keys.checkIn)
         defaults.removeObject(forKey: Keys.checkInDate)
+        defaults.removeObject(forKey: Keys.coachNotes)
+        defaults.removeObject(forKey: Keys.progressionState)
+        defaults.removeObject(forKey: Keys.trainingApproach)
 
         store.deleteAllData()
 
@@ -449,7 +604,8 @@ final class AppState {
         let entry = WorkoutHistoryEntry(
             title: recommendation.title,
             type: recommendation.type,
-            checkIn: checkIn
+            checkIn: checkIn,
+            qualitySubtype: recommendation.qualitySubtype
         )
         recentHistory.append(entry)
         if recentHistory.count > Self.maxHistoryCount {
@@ -483,12 +639,16 @@ final class AppState {
             recentHistory: recentHistory,
             memorySummary: buildMemorySummary(),
             activeIntent: store.activeIntent(),
-            upcomingContext: upcomingContextSummary
+            upcomingContext: upcomingContextSummary,
+            coachNotes: coachNotes,
+            progression: progressionState,
+            approach: trainingApproach
         )
         let result = engine.recommend(for: inputs)
 
         AnalyticsService.shared.track(.recommendationGenerated, properties: [
             "type": result.type.rawValue,
+            "quality_subtype": result.qualitySubtype?.rawValue ?? "none",
             "step_count": result.steps.count,
             "has_extras": !result.optionalExtras.isEmpty,
             "history_count": AnalyticsProperties.countBucket(recentHistory.count),

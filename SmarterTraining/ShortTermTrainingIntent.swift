@@ -24,15 +24,6 @@ struct ShortTermTrainingIntent: Codable, Identifiable, Equatable {
         case flexible
     }
 
-    enum QualitySubtype: String, Codable, Equatable {
-        case vo2
-        case threshold
-        case muscularEndurance
-        case tempo
-        case overUnders
-        case unspecified
-    }
-
     init(
         id: UUID = UUID(),
         generatedAt: Date = Date(),
@@ -137,6 +128,7 @@ enum TrainingIntentBuilder {
         sourceWorkoutId: UUID,
         workoutCompletedAt: Date,
         workoutType: WorkoutType?,
+        qualitySubtype: QualitySubtype? = nil,
         feedback: WorkoutFeedback?,
         perceivedEffort: Int?
     ) -> ShortTermTrainingIntent {
@@ -153,16 +145,40 @@ enum TrainingIntentBuilder {
         let day2Intensity: ShortTermTrainingIntent.RecommendedIntensity
         let day2Rationale: String
 
-        if isHard || isQuality {
+        // Fix D: a tempo session doesn't earn the same mandatory recovery as a VO2
+        // session. Use the subtype's recoveryCost to shape day1 when one is known.
+        if isQuality, let cost = qualitySubtype?.recoveryCost {
+            switch cost {
+            case 3:
+                day1Intensity = .recovery
+                day1Rationale = "Yesterday was a high-cost quality session. Today is for recovery."
+                day2Intensity = .flexible
+                day2Rationale = "If your legs come around, this is a good window for steady aerobic work."
+            case 2:
+                day1Intensity = isHard ? .recovery : .endurance
+                day1Rationale = isHard
+                    ? "Yesterday's quality landed hard. Keep today easy."
+                    : "Yesterday's quality was moderate cost — steady aerobic work is fine today."
+                day2Intensity = .flexible
+                day2Rationale = "Adjust based on how the legs feel."
+            default: // cost 1 (tempo)
+                day1Intensity = isHard ? .recovery : .endurance
+                day1Rationale = isHard
+                    ? "Even tempo can hit hard on a tired day. Keep today easy."
+                    : "Tempo is repeatable — you have room for another aerobic session today."
+                day2Intensity = .flexible
+                day2Rationale = "If your legs feel good, today can be your next quality opportunity."
+            }
+        } else if isHard || isQuality {
             day1Intensity = .recovery
             day1Rationale = "Yesterday's session was enough stress. Keep today easy or rest."
             day2Intensity = .flexible
             day2Rationale = "If your legs feel good, today can be your next quality opportunity."
         } else {
             day1Intensity = .endurance
-            day1Rationale = "You have room for another session if you want it."
+            day1Rationale = "A steady aerobic ride fits well today, building on yesterday without overdoing it."
             day2Intensity = .flexible
-            day2Rationale = "Adjust based on how you feel."
+            day2Rationale = "Tomorrow can lean harder if your legs feel ready — otherwise stay aerobic."
         }
 
         return ShortTermTrainingIntent(

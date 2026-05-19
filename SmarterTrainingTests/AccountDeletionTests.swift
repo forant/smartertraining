@@ -83,7 +83,7 @@ struct AccountDeletionTests {
             date: Date(),
             type: .travel,
             impact: .moderate,
-            duration: .fewDays,
+            duration: .threeToFiveDays,
             note: nil
         )
         state.addUpcomingContext(event)

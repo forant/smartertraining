@@ -11,6 +11,8 @@ struct TrainingMemorySummary {
     var recentActivities: [RecentActivity] = []
     var recentLifeStressors: [String] = []
     var recentIntensityLoadEstimate: Double = 0
+    var lastQualitySubtype: QualitySubtype?
+    var recentQualitySubtypes7d: [QualitySubtype] = []
 
     static let empty = TrainingMemorySummary()
 
@@ -72,6 +74,11 @@ enum TrainingMemoryBuilder {
             }
         }
 
+        let lastQualitySubtype = sorted.last(where: { $0.type == .quality })?.qualitySubtype
+        let recentQualitySubtypes = in7d
+            .filter { $0.type == .quality }
+            .compactMap(\.qualitySubtype)
+
         return TrainingMemorySummary(
             completedWorkoutCount7d: in7d.count,
             completedWorkoutCount14d: in14d.count,
@@ -82,7 +89,9 @@ enum TrainingMemoryBuilder {
             hadTooMuchFeedback7d: hadTooMuch,
             recentActivities: activities,
             recentLifeStressors: stressors,
-            recentIntensityLoadEstimate: load
+            recentIntensityLoadEstimate: load,
+            lastQualitySubtype: lastQualitySubtype,
+            recentQualitySubtypes7d: recentQualitySubtypes
         )
     }
 }

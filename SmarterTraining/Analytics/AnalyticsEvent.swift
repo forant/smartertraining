@@ -101,6 +101,19 @@ enum AnalyticsEvent: String, Sendable {
     case upcomingContextEdited = "upcoming_context_edited"
     case upcomingContextDeleted = "upcoming_context_deleted"
 
+    // MARK: - Coach Notes
+    case coachNotesUpdated = "coach_notes_updated"
+
+    // MARK: - Coach Reflection (post-workout Q&A)
+    case coachReflectionShown = "coach_reflection_shown"
+    case coachReflectionAnswered = "coach_reflection_answered"
+
+    // MARK: - Progression
+    case progressionTierChanged = "progression_tier_changed"
+
+    // MARK: - Training Approach
+    case trainingApproachChanged = "training_approach_changed"
+
     // MARK: - Notifications
     case notificationPermissionRequested = "notification_permission_requested"
     case notificationPermissionGranted = "notification_permission_granted"

@@ -3,6 +3,7 @@ import SwiftUI
 struct WorkoutDetailView: View {
     let entry: WorkoutHistoryEntry
     let ride: CompletedWorkout?
+    var likelyTomorrow: LikelyWorkoutPreview? = nil
 
     var body: some View {
         ScrollView {
@@ -19,6 +20,12 @@ struct WorkoutDetailView: View {
 
                 if let reflection = ride?.reflection {
                     reflectionSection(reflection)
+                } else if let likelyTomorrow {
+                    LikelyTomorrowCard(preview: likelyTomorrow)
+                }
+
+                if let coachReflection = ride?.coachReflection {
+                    SavedCoachReflectionCard(reflection: coachReflection)
                 }
 
                 if entry.feedback != nil || ride?.perceivedEffort != nil || ride?.postWorkoutNote != nil {
@@ -53,6 +60,17 @@ struct WorkoutDetailView: View {
                     .background(typeColor.opacity(0.12))
                     .foregroundStyle(typeColor)
                     .clipShape(Capsule())
+
+                if let subtype = entry.qualitySubtype {
+                    Text(subtype.label)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(typeColor.opacity(0.08))
+                        .foregroundStyle(typeColor.opacity(0.85))
+                        .clipShape(Capsule())
+                }
 
                 Text(dateLabel)
                     .font(.subheadline)
@@ -145,7 +163,10 @@ struct WorkoutDetailView: View {
                 reflectionRow(icon: "exclamationmark.triangle", color: .orange, text: watch)
             }
 
-            if !reflection.nextTwoDays.isEmpty {
+            if let likelyTomorrow {
+                Divider()
+                LikelyTomorrowCard(preview: likelyTomorrow)
+            } else if !reflection.nextTwoDays.isEmpty {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 6) {

@@ -24,6 +24,9 @@ struct CompletedWorkout: Codable, Identifiable {
     var reflection: PostWorkoutReflection?
     var reflectionStatus: ReflectionStatus?
 
+    // Interactive coach reflection (one Q&A captured at session-finish)
+    var coachReflection: CoachReflection?
+
     // Session stats
     var averagePower: Int?
     var maxPower: Int?
@@ -68,6 +71,7 @@ struct CompletedWorkout: Codable, Identifiable {
         postWorkoutNote: String? = nil,
         reflection: PostWorkoutReflection? = nil,
         reflectionStatus: ReflectionStatus? = nil,
+        coachReflection: CoachReflection? = nil,
         averagePower: Int? = nil,
         maxPower: Int? = nil,
         averageCadence: Int? = nil,
@@ -92,6 +96,7 @@ struct CompletedWorkout: Codable, Identifiable {
         self.postWorkoutNote = postWorkoutNote
         self.reflection = reflection
         self.reflectionStatus = reflectionStatus
+        self.coachReflection = coachReflection
         self.averagePower = averagePower
         self.maxPower = maxPower
         self.averageCadence = averageCadence

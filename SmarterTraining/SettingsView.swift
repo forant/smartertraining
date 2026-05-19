@@ -26,6 +26,7 @@ struct SettingsView: View {
                     membershipSection(subscriptionService)
                 }
                 accountSection
+                coachSettingsSection
                 devicesSection
                 integrationsSection
                 trainingDataSection
@@ -167,6 +168,67 @@ struct SettingsView: View {
                     .foregroundStyle(.red)
             }
         }
+    }
+
+    // MARK: - Coach Settings
+
+    private var coachSettingsSection: some View {
+        Section {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Training Approach shapes how your coach balances progression, recovery, and consistency over time.")
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("Some athletes want a steadier, more sustainable path. Others prefer to pursue adaptation more aggressively when recovery allows. None of these approaches are \u{201C}better\u{201D} \u{2014} they simply reflect different goals, schedules, and recovery realities.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.vertical, 4)
+
+            ForEach(TrainingApproach.allCases, id: \.self) { option in
+                approachRow(option)
+            }
+
+            Text("You can change this anytime as your goals, schedule, or recovery capacity evolve.")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+        } header: {
+            Text("Coach Settings")
+        }
+    }
+
+    private func approachRow(_ option: TrainingApproach) -> some View {
+        let isSelected = appState.trainingApproach == option
+        return Button {
+            appState.setTrainingApproach(option)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(isSelected ? Theme.Brand.primary : Color(.tertiaryLabel))
+                    .padding(.top, 2)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(option.title)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+                    Text(option.shortDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(option.title). \(option.shortDescription)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     // MARK: - Devices

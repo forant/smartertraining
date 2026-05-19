@@ -44,6 +44,63 @@ struct RideSessionView: View {
         case summary
     }
 
+    private var coachReflectionPrompt: CoachReflectionPrompt? {
+        guard finishedPhase == .summary, let workout = completedWorkout else { return nil }
+        let recent = appState.store.finishedRides().filter { $0.id != workout.id }
+        let expected = expectedRecommendationDuration()
+        return CoachReflectionGenerator.generate(
+            workout: workout,
+            recommendation: recommendation,
+            expectedDuration: expected,
+            recentRides: recent,
+            coachNotes: appState.coachNotes
+        )
+    }
+
+    private var coachReflectionContext: CoachReflectionValidator.Context {
+        guard let workout = completedWorkout else { return .empty }
+        let priorSameSubtype = appState.store.finishedRides()
+            .filter { $0.id != workout.id && $0.workoutType == .quality }
+            .count
+        return CoachReflectionValidator.Context(
+            recentSameSubtypeCount: priorSameSubtype,
+            priorSameResponse: false,
+            coachNoteTags: appState.coachNotes.tags
+        )
+    }
+
+    private func expectedRecommendationDuration() -> TimeInterval? {
+        let steps = WorkoutConverter.convert(recommendation: recommendation, ftp: ftp)
+        let total = steps.reduce(0.0) { $0 + $1.duration }
+        return total > 0 ? total : nil
+    }
+
+    private func persistCoachReflection(_ reflection: CoachReflection) {
+        guard var workout = completedWorkout else { return }
+        workout.coachReflection = reflection
+        completedWorkout = workout
+        appState.store.saveRide(workout)
+        appState.triggerSync()
+    }
+
+    private var likelyTomorrowPreview: LikelyWorkoutPreview? {
+        // Only show after the workout is logged so the intent reflects the just-finished session.
+        guard finishedPhase == .summary else { return nil }
+        let memory = TrainingMemoryBuilder.build(
+            history: recentHistory,
+            rides: appState.store.finishedRides()
+        )
+        return LikelyTomorrowBuilder.preview(
+            sourceWorkoutType: recommendation.type,
+            sourceQualitySubtype: recommendation.qualitySubtype,
+            intent: appState.store.activeIntent(),
+            profile: profile,
+            memory: memory,
+            upcoming: appState.upcomingContextSummary,
+            coachNotes: appState.coachNotes
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -474,6 +531,7 @@ struct RideSessionView: View {
             sourceWorkoutId: completedWorkout?.id ?? UUID(),
             workoutCompletedAt: Date(),
             workoutType: recommendation.type,
+            qualitySubtype: recommendation.qualitySubtype,
             feedback: postFeedback,
             perceivedEffort: postEffort
         )
@@ -795,10 +853,27 @@ struct RideSessionView: View {
                 if let reflection = reflectionService.reflection {
                     PostWorkoutReflectionCard(
                         reflection: reflection,
-                        isLoading: false
+                        isLoading: false,
+                        likelyTomorrow: likelyTomorrowPreview
                     )
                 } else if reflectionService.isLoading {
                     ReflectionLoadingView()
+                } else if let preview = likelyTomorrowPreview {
+                    LikelyTomorrowCard(preview: preview)
+                }
+
+                if let workout = completedWorkout,
+                   workout.coachReflection == nil,
+                   let prompt = coachReflectionPrompt {
+                    CoachReflectionCard(
+                        prompt: prompt,
+                        workoutId: workout.id,
+                        context: coachReflectionContext
+                    ) { reflection in
+                        persistCoachReflection(reflection)
+                    }
+                } else if let saved = completedWorkout?.coachReflection {
+                    SavedCoachReflectionCard(reflection: saved)
                 }
 
                 if healthKit.isAvailable {

@@ -11,12 +11,23 @@ struct RecommendationEngine {
         var memorySummary: TrainingMemorySummary = .empty
         var activeIntent: ShortTermTrainingIntent? = nil
         var upcomingContext: UpcomingContextSummary = .empty
+        var coachNotes: CoachNotes = .empty
+        var progression: ProgressionState = .empty
+        var approach: TrainingApproach = .balanced
     }
 
     func recommend(for inputs: Inputs) -> WorkoutRecommendation {
         let type = chooseWorkoutType(for: inputs)
-        let reason = buildReason(type: type, inputs: inputs)
-        var workout = buildWorkout(type: type, time: inputs.checkIn.timeAvailable, reason: reason)
+        let subtype: QualitySubtype? = (type == .quality) ? chooseQualitySubtype(for: inputs) : nil
+        let tier = subtype.map { inputs.progression.tier(for: $0) }
+        let reason = buildReason(type: type, subtype: subtype, tier: tier, inputs: inputs)
+        var workout = buildWorkout(
+            type: type,
+            subtype: subtype,
+            tier: tier ?? .progressing,
+            time: inputs.checkIn.timeAvailable,
+            reason: reason
+        )
         workout.optionalExtras = adjustExtras(workout.optionalExtras, type: type, time: inputs.checkIn.timeAvailable, profile: inputs.profile)
         return workout
     }
@@ -24,6 +35,17 @@ struct RecommendationEngine {
     // MARK: - Profile Bias
 
     func qualityWillingness(for profile: UserProfile) -> Int {
+        qualityWillingness(for: profile, progression: .empty, approach: .balanced)
+    }
+
+    func qualityWillingness(for profile: UserProfile, progression: ProgressionState) -> Int {
+        qualityWillingness(for: profile, progression: progression, approach: .balanced)
+    }
+
+    /// Willingness to prescribe quality. Bumped by demonstrable progression —
+    /// an athlete who has stabilized in 2+ subtypes has earned more frequent quality.
+    /// Training approach also nudges willingness up (ambitious) or down (sustainable).
+    func qualityWillingness(for profile: UserProfile, progression: ProgressionState, approach: TrainingApproach) -> Int {
         var score = 0
 
         switch profile.currentState {
@@ -46,6 +68,14 @@ struct RecommendationEngine {
         if goals.contains(.consistent) || goals.contains(.healthier) {
             score -= 1
         }
+
+        // Progression boost: stable+ in 2+ subtypes earns a small willingness bump.
+        if progression.stableOrBetterSubtypeCount >= 2 {
+            score += 1
+        }
+
+        // Approach bias (sustainable -1, balanced 0, ambitious +1).
+        score += approach.willingnessBias
 
         return max(-2, min(2, score))
     }
@@ -88,7 +118,7 @@ struct RecommendationEngine {
         let checkIn = inputs.checkIn
         let lastFeedback = inputs.recentHistory.last?.feedback
         let lastType = inputs.recentHistory.last?.type
-        let willingness = qualityWillingness(for: inputs.profile)
+        let willingness = qualityWillingness(for: inputs.profile, progression: inputs.progression, approach: inputs.approach)
         let memory = inputs.memorySummary
         let todayActStress = activityStress(from: checkIn)
         let actStress = max(todayActStress, memoryActivityStress(memory))
@@ -228,6 +258,110 @@ struct RecommendationEngine {
         return .endurance
     }
 
+    // MARK: - Quality Subtype Selection
+
+    /// Picks the most appropriate quality subtype for today. Honors intent hints
+    /// (when the intent is active today), down-shifts on heavy recent load, matches
+    /// readiness to fatigue cost, enforces week-level variety, and falls back to
+    /// tempo (the lowest-cost quality option).
+    func chooseQualitySubtype(for inputs: Inputs) -> QualitySubtype {
+        // Fix A: only honor the intent hint when the intent is active today.
+        if let intent = inputs.activeIntent, !intent.isExpired,
+           intent.activeDay() != nil,
+           let hinted = intent.qualitySubtype {
+            return hinted
+        }
+
+        let checkIn = inputs.checkIn
+        let memory = inputs.memorySummary
+        let time = checkIn.timeAvailable
+        let legs = checkIn.legs
+        let feel = checkIn.overallFeel
+        let motivation = checkIn.motivation
+        let willingness = qualityWillingness(for: inputs.profile, progression: inputs.progression, approach: inputs.approach)
+        let history = inputs.recentHistory
+
+        let peakReadiness = feel == "Great" && legs == "Fresh" && motivation == "High"
+        let goodReadiness = (feel == "Great" || feel == "Good")
+            && (legs == "Fresh" || legs == "Normal")
+            && motivation != "Low"
+
+        // Fix B: when the week has already absorbed real load, the body needs
+        // sub-threshold work — not VO2 / over-unders. Down-shift the priority order.
+        let loadDownshift = memory.hasHighRecentLoad
+            || memory.hardDayCount7d >= 2
+            || memory.recentIntensityLoadEstimate >= 8
+
+        // Fix E: VO2 is the highest-cost option. Withhold it from users who are
+        // returning after a break, who have very little recent history to build on,
+        // or whose profile genuinely doesn't support that intensity yet.
+        let vo2Allowed = !memory.isReturningAfterBreak
+            && history.count >= 2
+            && willingness >= 1
+
+        // Build eligibility list in priority order. Under load down-shift, low-cost
+        // options lead; otherwise hardest-first.
+        var preferred: [QualitySubtype] = []
+
+        if loadDownshift {
+            if time >= 35 { preferred.append(.muscularEndurance) }
+            preferred.append(.tempo)
+            if goodReadiness && time >= 25 { preferred.append(.threshold) }
+            // VO2 and over-unders intentionally omitted under load down-shift.
+        } else {
+            if peakReadiness && vo2Allowed && time >= 25 {
+                preferred.append(.vo2)
+            }
+            if goodReadiness && time >= 35 {
+                preferred.append(.overUnders)
+            }
+            if goodReadiness && time >= 25 {
+                preferred.append(.threshold)
+            }
+            if time >= 35 {
+                preferred.append(.muscularEndurance)
+            }
+            preferred.append(.tempo)
+        }
+
+        // Coach notes: apply persistent athlete context as soft biases.
+        // These are intentionally minimal and explainable — not a planning engine.
+        let notes = inputs.coachNotes
+        if notes.tags.contains(.vo2MentallyDifficult) {
+            preferred.removeAll { $0 == .vo2 }
+        }
+        if notes.tags.contains(.kneeSensitivity), preferred.count > 1 {
+            // Long sustained sub-threshold work tends to load the knees; de-prioritize ME.
+            preferred.removeAll { $0 == .muscularEndurance }
+        }
+        if notes.tags.contains(.legsFatigueFirst),
+           let idx = preferred.firstIndex(of: .muscularEndurance), idx > 0 {
+            // Up-prioritize muscular endurance to build durable strength.
+            preferred.remove(at: idx)
+            preferred.insert(.muscularEndurance, at: 0)
+        }
+
+        // Fix C: enforce week-level variety in two layers.
+        //   1. Drop subtypes already used 2+ times in the last 7 days.
+        //   2. Prefer subtypes never used this week over ones used once.
+        //   3. Drop the immediately-prior subtype to prevent back-to-back repeats.
+        let weeklyCounts = Dictionary(grouping: memory.recentQualitySubtypes7d, by: { $0 })
+            .mapValues(\.count)
+
+        let underUsed = preferred.filter { (weeklyCounts[$0] ?? 0) < 2 }
+        if !underUsed.isEmpty { preferred = underUsed }
+
+        let neverUsedThisWeek = preferred.filter { weeklyCounts[$0] == nil }
+        if !neverUsedThisWeek.isEmpty { preferred = neverUsedThisWeek }
+
+        if let last = memory.lastQualitySubtype, preferred.count > 1,
+           let idx = preferred.firstIndex(of: last) {
+            preferred.remove(at: idx)
+        }
+
+        return preferred.first ?? .tempo
+    }
+
     // MARK: - Intent Application
 
     private func applyIntent(
@@ -261,6 +395,14 @@ struct RecommendationEngine {
     // MARK: - Reason Builder
 
     func buildReason(type: WorkoutType, inputs: Inputs) -> String {
+        buildReason(type: type, subtype: nil, tier: nil, inputs: inputs)
+    }
+
+    func buildReason(type: WorkoutType, subtype: QualitySubtype?, inputs: Inputs) -> String {
+        buildReason(type: type, subtype: subtype, tier: nil, inputs: inputs)
+    }
+
+    func buildReason(type: WorkoutType, subtype: QualitySubtype?, tier: ProgressionTier?, inputs: Inputs) -> String {
         if let intent = inputs.activeIntent, !intent.isExpired, let rationale = intent.rationale() {
             let intentIntensity = intent.recommendedIntensity()
             if intentIntensity == .rest || intentIntensity == .recovery {
@@ -295,7 +437,53 @@ struct RecommendationEngine {
         case .endurance:
             return buildEnduranceReason(checkIn: checkIn, lastType: lastType, lastFeedback: lastFeedback, easierCount: easierCount, profile: inputs.profile, actStress: actStress, memory: memory)
         case .quality:
-            return buildQualityReason(checkIn: checkIn, lastFeedback: lastFeedback, easierCount: easierCount, profile: inputs.profile, memory: memory)
+            let baseline = buildQualityReason(subtype: subtype, checkIn: checkIn, lastFeedback: lastFeedback, easierCount: easierCount, profile: inputs.profile, memory: memory)
+            guard let subtype, let tier else { return baseline }
+            let progressionLine = progressionFraming(
+                subtype: subtype,
+                tier: tier,
+                state: inputs.progression.state(for: subtype),
+                approach: inputs.approach
+            )
+            return progressionLine.isEmpty ? baseline : "\(baseline) \(progressionLine)"
+        }
+    }
+
+    /// Short coach-style line that explains why today's workout is at this tier,
+    /// flavored by training approach. Empty when there's nothing meaningful to add
+    /// (e.g. starter tier with no history).
+    private func progressionFraming(
+        subtype: QualitySubtype,
+        tier: ProgressionTier,
+        state: SubtypeProgressionState,
+        approach: TrainingApproach
+    ) -> String {
+        let subtypeName = subtype.label.lowercased()
+        switch tier {
+        case .starter:
+            // Don't volunteer "you're a beginner" — silent at this tier.
+            return ""
+        case .progressing:
+            guard state.consecutiveSuccesses >= 1 else { return "" }
+            switch approach {
+            case .sustainable:
+                return "Recent \(subtypeName) work has been landing — keeping the structure steady today."
+            case .balanced:
+                return "Recent \(subtypeName) work has been landing — keeping the structure consistent today."
+            case .ambitious:
+                return "Recent \(subtypeName) work has been landing — small bump in progression pressure today."
+            }
+        case .stable:
+            switch approach {
+            case .sustainable:
+                return "You've handled recent \(subtypeName) work consistently — keeping progression steady and sustainable."
+            case .balanced:
+                return "You've handled recent \(subtypeName) work consistently, so this is a good chance to extend the work."
+            case .ambitious:
+                return "You've been handling recent \(subtypeName) work consistently, so this is a good opportunity to push progression slightly."
+            }
+        case .advanced:
+            return "\(subtype.label) is one of your stronger systems right now — today reflects that."
         }
     }
 
@@ -436,7 +624,13 @@ struct RecommendationEngine {
         return "Today's inputs line up well for steady endurance work. Controlled effort, nothing forced."
     }
 
-    private func buildQualityReason(checkIn: CheckIn, lastFeedback: WorkoutFeedback?, easierCount: Int, profile: UserProfile, memory: TrainingMemorySummary) -> String {
+    private func buildQualityReason(subtype: QualitySubtype?, checkIn: CheckIn, lastFeedback: WorkoutFeedback?, easierCount: Int, profile: UserProfile, memory: TrainingMemorySummary) -> String {
+        let baseline = baselineQualityReason(checkIn: checkIn, lastFeedback: lastFeedback, easierCount: easierCount, profile: profile, memory: memory)
+        guard let subtype else { return baseline }
+        return "\(baseline) \(subtypeFraming(subtype))"
+    }
+
+    private func baselineQualityReason(checkIn: CheckIn, lastFeedback: WorkoutFeedback?, easierCount: Int, profile: UserProfile, memory: TrainingMemorySummary) -> String {
         let highWillingness = qualityWillingness(for: profile) >= 1
 
         if lastFeedback == .easy && easierCount >= 1 {
@@ -475,13 +669,37 @@ struct RecommendationEngine {
         return "Your signals are strong today, so the focus is quality. Controlled intensity with purpose."
     }
 
+    /// Short coach-style framing line that explains *what kind* of quality and why it fits today.
+    private func subtypeFraming(_ subtype: QualitySubtype) -> String {
+        switch subtype {
+        case .vo2:
+            return "VO2 intervals make sense when you're peaked — short, sharp efforts above threshold."
+        case .threshold:
+            return "Threshold work builds the ceiling: sustained efforts right at your limit."
+        case .muscularEndurance:
+            return "Long sub-threshold blocks build durable strength without the spike of full quality."
+        case .tempo:
+            return "Tempo is the most repeatable quality dose — productive without digging a hole."
+        case .overUnders:
+            return "Over/unders teach you to ride through brief surges and recover at pace."
+        }
+    }
+
     // MARK: - Workout Builder
 
     func buildWorkout(type: WorkoutType, time: Int, reason: String) -> WorkoutRecommendation {
+        buildWorkout(type: type, subtype: nil, tier: .progressing, time: time, reason: reason)
+    }
+
+    func buildWorkout(type: WorkoutType, subtype: QualitySubtype?, time: Int, reason: String) -> WorkoutRecommendation {
+        buildWorkout(type: type, subtype: subtype, tier: .progressing, time: time, reason: reason)
+    }
+
+    func buildWorkout(type: WorkoutType, subtype: QualitySubtype?, tier: ProgressionTier, time: Int, reason: String) -> WorkoutRecommendation {
         switch type {
         case .recovery: return buildRecovery(time: time, reason: reason)
         case .endurance: return buildEndurance(time: time, reason: reason)
-        case .quality: return buildQuality(time: time, reason: reason)
+        case .quality: return buildQuality(subtype: subtype ?? .threshold, tier: tier, time: time, reason: reason)
         }
     }
 
@@ -557,10 +775,79 @@ struct RecommendationEngine {
         )
     }
 
-    private func buildQuality(time: Int, reason: String) -> WorkoutRecommendation {
+    private func buildQuality(subtype: QualitySubtype, tier: ProgressionTier, time: Int, reason: String) -> WorkoutRecommendation {
+        switch subtype {
+        case .vo2: return buildVO2(tier: tier, time: time, reason: reason)
+        case .threshold: return buildThreshold(tier: tier, time: time, reason: reason)
+        case .muscularEndurance: return buildMuscularEndurance(tier: tier, time: time, reason: reason)
+        case .tempo: return buildTempo(tier: tier, time: time, reason: reason)
+        case .overUnders: return buildOverUnders(tier: tier, time: time, reason: reason)
+        }
+    }
+
+    // MARK: VO2 Max (106–115% FTP)
+
+    private func buildVO2(tier: ProgressionTier, time: Int, reason: String) -> WorkoutRecommendation {
+        // Short time uses the compact pattern regardless of tier — keeps trainer-friendly.
         if time <= 30 {
             return WorkoutRecommendation(
-                type: .quality,
+                type: .quality, qualitySubtype: .vo2,
+                title: "Compact VO2 Intervals",
+                summary: "Short, sharp efforts above threshold",
+                reason: reason,
+                steps: [
+                    WorkoutStep(role: .warmup, modality: .cycling, name: "Warm-up", durationText: "6 min", targetText: "Build from easy to steady, include 2 x 30 sec openers"),
+                    WorkoutStep(role: .primary, modality: .cycling, name: "Main Set", durationText: "5 x 2 min", targetText: "108\u{2013}115% FTP with 2 min easy between reps"),
+                    WorkoutStep(role: .cooldown, modality: .cycling, name: "Cool down", durationText: "4 min", targetText: "Easy spin")
+                ],
+                optionalExtras: []
+            )
+        }
+        // Tier-aware main set, picking the highest tier that fits.
+        let resolved = resolveTier(requested: tier, time: time, minimums: [
+            .advanced: 55, .stable: 48, .progressing: 40, .starter: 0
+        ])
+        let mainText: (String, String)
+        let title: String
+        let summary: String
+        switch resolved {
+        case .starter:
+            mainText = ("4 x 2 min", "108\u{2013}115% FTP with 2 min easy between reps")
+            title = "VO2 Intervals \u{2014} Starter"
+            summary = "Short reps above threshold"
+        case .progressing:
+            mainText = ("5 x 3 min", "106\u{2013}112% FTP with 3 min easy between reps")
+            title = "VO2 Max Intervals"
+            summary = "Hard intervals above threshold"
+        case .stable:
+            mainText = ("6 x 3 min", "106\u{2013}112% FTP with 3 min easy between reps")
+            title = "VO2 Max Intervals"
+            summary = "Extended VO2 set"
+        case .advanced:
+            mainText = ("6 x 3 min", "110\u{2013}115% FTP with 2 min 30 sec easy between reps")
+            title = "VO2 Max Intervals \u{2014} Dense"
+            summary = "Dense VO2 set, tighter recoveries"
+        }
+        let warmupMin = time >= 60 ? 12 : 10
+        let cooldownMin = time >= 60 ? 8 : 5
+        return WorkoutRecommendation(
+            type: .quality, qualitySubtype: .vo2,
+            title: title, summary: summary, reason: reason,
+            steps: [
+                WorkoutStep(role: .warmup, modality: .cycling, name: "Warm-up", durationText: "\(warmupMin) min", targetText: "Build from easy to steady, include 2 x 30 sec openers"),
+                WorkoutStep(role: .primary, modality: .cycling, name: "Main Set", durationText: mainText.0, targetText: mainText.1),
+                WorkoutStep(role: .cooldown, modality: .cycling, name: "Cool down", durationText: "\(cooldownMin) min", targetText: "Easy spin")
+            ],
+            optionalExtras: []
+        )
+    }
+
+    // MARK: Threshold (95–100% FTP)
+
+    private func buildThreshold(tier: ProgressionTier, time: Int, reason: String) -> WorkoutRecommendation {
+        if time <= 30 {
+            return WorkoutRecommendation(
+                type: .quality, qualitySubtype: .threshold,
                 title: "Compact Threshold",
                 summary: "Short and sharp quality session",
                 reason: reason,
@@ -572,32 +859,213 @@ struct RecommendationEngine {
                 optionalExtras: []
             )
         }
-        if time >= 60 {
+        let resolved = resolveTier(requested: tier, time: time, minimums: [
+            .advanced: 55, .stable: 55, .progressing: 35, .starter: 0
+        ])
+        let mainText: (String, String)
+        let title: String
+        let summary: String
+        switch resolved {
+        case .starter:
+            mainText = ("3 x 5 min", "95\u{2013}100% FTP with 3 min easy between reps")
+            title = "Threshold Intervals \u{2014} Starter"
+            summary = "Shorter at-threshold blocks"
+        case .progressing:
+            mainText = ("4 x 5 min", "95\u{2013}100% FTP with 3 min easy between reps")
+            title = "Threshold Intervals"
+            summary = "Controlled quality work"
+        case .stable:
+            mainText = ("3 x 10 min", "95\u{2013}100% FTP with 3 min easy between reps")
+            title = "Threshold Intervals \u{2014} Extended"
+            summary = "Longer time at threshold"
+        case .advanced:
+            mainText = ("2 x 15 min", "95\u{2013}100% FTP with 4 min easy between reps")
+            title = "Threshold Intervals \u{2014} Sustained"
+            summary = "Sustained time at threshold"
+        }
+        // Match the historical "long" threshold pacing for time>=60 so users get
+        // a real 15-min warmup at full sessions; shorter sessions keep a 10-min warmup.
+        let warmupMin = time >= 60 ? 15 : 10
+        let cooldownMin = time >= 60 ? 10 : 5
+        return WorkoutRecommendation(
+            type: .quality, qualitySubtype: .threshold,
+            title: title, summary: summary, reason: reason,
+            steps: [
+                WorkoutStep(role: .warmup, modality: .cycling, name: "Warm-up", durationText: "\(warmupMin) min", targetText: "Build from easy to steady"),
+                WorkoutStep(role: .primary, modality: .cycling, name: "Main Set", durationText: mainText.0, targetText: mainText.1),
+                WorkoutStep(role: .cooldown, modality: .cycling, name: "Cool down", durationText: "\(cooldownMin) min", targetText: "Easy spin")
+            ],
+            optionalExtras: []
+        )
+    }
+
+    // MARK: Muscular Endurance (88–95% FTP)
+
+    private func buildMuscularEndurance(tier: ProgressionTier, time: Int, reason: String) -> WorkoutRecommendation {
+        if time <= 35 {
             return WorkoutRecommendation(
-                type: .quality,
-                title: "Threshold Intervals",
-                summary: "Full quality session with warm-up and cool-down",
+                type: .quality, qualitySubtype: .muscularEndurance,
+                title: "Muscular Endurance",
+                summary: "Sustained sub-threshold blocks",
                 reason: reason,
                 steps: [
-                    WorkoutStep(role: .warmup, modality: .cycling, name: "Warm-up", durationText: "15 min", targetText: "Build from easy to steady, include 2 x 1 min openers"),
-                    WorkoutStep(role: .primary, modality: .cycling, name: "Main Set", durationText: "4 x 6 min", targetText: "95\u{2013}100% FTP with 3 min easy between reps"),
-                    WorkoutStep(role: .cooldown, modality: .cycling, name: "Cool down", durationText: "10 min", targetText: "Easy spin, gradually fade")
+                    WorkoutStep(role: .warmup, modality: .cycling, name: "Warm-up", durationText: "6 min", targetText: "Build from easy to steady"),
+                    WorkoutStep(role: .primary, modality: .cycling, name: "Main Set", durationText: "2 x 10 min", targetText: "88\u{2013}95% FTP with 3 min easy between reps"),
+                    WorkoutStep(role: .cooldown, modality: .cycling, name: "Cool down", durationText: "4 min", targetText: "Easy spin")
                 ],
                 optionalExtras: []
             )
         }
+        let resolved = resolveTier(requested: tier, time: time, minimums: [
+            .advanced: 60, .stable: 60, .progressing: 40, .starter: 0
+        ])
+        let mainText: (String, String)
+        let title: String
+        let summary: String
+        switch resolved {
+        case .starter:
+            mainText = ("4 x 8 min", "88\u{2013}95% FTP with 3 min easy between reps")
+            title = "Muscular Endurance \u{2014} Starter"
+            summary = "Shorter sub-threshold blocks"
+        case .progressing:
+            mainText = ("3 x 9 min", "88\u{2013}95% FTP with 3 min easy between reps")
+            title = "Muscular Endurance"
+            summary = "Sustained sub-threshold blocks"
+        case .stable:
+            mainText = ("3 x 12 min", "88\u{2013}95% FTP with 4 min easy between reps")
+            title = "Muscular Endurance \u{2014} Extended"
+            summary = "Longer sub-threshold blocks"
+        case .advanced:
+            mainText = ("2 x 20 min", "88\u{2013}95% FTP with 5 min easy between reps")
+            title = "Muscular Endurance \u{2014} Sustained"
+            summary = "Sustained force production"
+        }
+        let warmupMin = time >= 60 ? 10 : 8
+        let cooldownMin = time >= 60 ? 8 : 5
         return WorkoutRecommendation(
-            type: .quality,
-            title: "Threshold Intervals",
-            summary: "Controlled quality work",
-            reason: reason,
+            type: .quality, qualitySubtype: .muscularEndurance,
+            title: title, summary: summary, reason: reason,
             steps: [
-                WorkoutStep(role: .warmup, modality: .cycling, name: "Warm-up", durationText: "10 min", targetText: "Build from easy to steady"),
-                WorkoutStep(role: .primary, modality: .cycling, name: "Main Set", durationText: "4 x 5 min", targetText: "95\u{2013}100% FTP with 3 min easy between reps"),
-                WorkoutStep(role: .cooldown, modality: .cycling, name: "Cool down", durationText: "10 min", targetText: "Easy spin")
+                WorkoutStep(role: .warmup, modality: .cycling, name: "Warm-up", durationText: "\(warmupMin) min", targetText: "Build from easy to steady"),
+                WorkoutStep(role: .primary, modality: .cycling, name: "Main Set", durationText: mainText.0, targetText: mainText.1),
+                WorkoutStep(role: .cooldown, modality: .cycling, name: "Cool down", durationText: "\(cooldownMin) min", targetText: "Easy spin")
             ],
             optionalExtras: []
         )
+    }
+
+    // MARK: Tempo (78–87% FTP)
+
+    private func buildTempo(tier: ProgressionTier, time: Int, reason: String) -> WorkoutRecommendation {
+        if time <= 30 {
+            return WorkoutRecommendation(
+                type: .quality, qualitySubtype: .tempo,
+                title: "Compact Tempo",
+                summary: "Controlled steady tempo block",
+                reason: reason,
+                steps: [
+                    WorkoutStep(role: .warmup, modality: .cycling, name: "Warm-up", durationText: "5 min", targetText: "Build from easy to steady"),
+                    WorkoutStep(role: .primary, modality: .cycling, name: "Main", durationText: "18 min", targetText: "80\u{2013}87% FTP, steady"),
+                    WorkoutStep(role: .cooldown, modality: .cycling, name: "Cool down", durationText: "5 min", targetText: "Easy spin")
+                ],
+                optionalExtras: []
+            )
+        }
+        let resolved = resolveTier(requested: tier, time: time, minimums: [
+            .advanced: 55, .stable: 45, .progressing: 35, .starter: 0
+        ])
+        let mainStep: WorkoutStep
+        let title: String
+        let summary: String
+        switch resolved {
+        case .starter:
+            mainStep = WorkoutStep(role: .primary, modality: .cycling, name: "Main", durationText: "20 min", targetText: "80\u{2013}87% FTP, steady")
+            title = "Tempo Ride \u{2014} Starter"
+            summary = "Steady tempo block"
+        case .progressing:
+            mainStep = WorkoutStep(role: .primary, modality: .cycling, name: "Main", durationText: "25 min", targetText: "80\u{2013}87% FTP, steady")
+            title = "Tempo Ride"
+            summary = "Steady tempo block"
+        case .stable:
+            mainStep = WorkoutStep(role: .primary, modality: .cycling, name: "Main Set", durationText: "2 x 15 min", targetText: "80\u{2013}87% FTP with 3 min easy between reps")
+            title = "Tempo Blocks"
+            summary = "Two sustained tempo blocks"
+        case .advanced:
+            mainStep = WorkoutStep(role: .primary, modality: .cycling, name: "Main Set", durationText: "2 x 20 min", targetText: "80\u{2013}87% FTP with 5 min easy between reps")
+            title = "Tempo Blocks \u{2014} Extended"
+            summary = "Longer sustained tempo work"
+        }
+        let warmupMin = time >= 60 ? 10 : 8
+        let cooldownMin = time >= 60 ? 8 : 5
+        return WorkoutRecommendation(
+            type: .quality, qualitySubtype: .tempo,
+            title: title, summary: summary, reason: reason,
+            steps: [
+                WorkoutStep(role: .warmup, modality: .cycling, name: "Warm-up", durationText: "\(warmupMin) min", targetText: "Build from easy to steady"),
+                mainStep,
+                WorkoutStep(role: .cooldown, modality: .cycling, name: "Cool down", durationText: "\(cooldownMin) min", targetText: "Easy spin")
+            ],
+            optionalExtras: []
+        )
+    }
+
+    // MARK: Over/Unders (alternating 105% / 88% FTP within each set)
+
+    private func buildOverUnders(tier: ProgressionTier, time: Int, reason: String) -> WorkoutRecommendation {
+        let resolved = resolveTier(requested: tier, time: time, minimums: [
+            .advanced: 60, .stable: 55, .progressing: 50, .starter: 0
+        ])
+        let mainText: (String, String)
+        let title: String
+        let summary: String
+        switch resolved {
+        case .starter:
+            mainText = ("3 x 6 min", "Alternate 2 min @ 105% FTP / 1 min @ 88% FTP, 4 min easy between sets")
+            title = "Over/Under Sets \u{2014} Starter"
+            summary = "Alternating supra/sub-threshold work"
+        case .progressing:
+            mainText = ("4 x 6 min", "Alternate 2 min @ 105% FTP / 1 min @ 88% FTP, 4 min easy between sets")
+            title = "Over/Under Sets"
+            summary = "Alternating supra/sub-threshold work"
+        case .stable:
+            mainText = ("4 x 6 min", "Alternate 2 min @ 105% FTP / 1 min @ 88% FTP, 3 min easy between sets")
+            title = "Over/Under Sets \u{2014} Tight"
+            summary = "Tighter recoveries between sets"
+        case .advanced:
+            mainText = ("5 x 6 min", "Alternate 2 min @ 105% FTP / 1 min @ 88% FTP, 4 min easy between sets")
+            title = "Over/Under Sets \u{2014} Dense"
+            summary = "Higher-density over/under work"
+        }
+        let warmupMin = time >= 60 ? 12 : 8
+        let cooldownMin = time >= 60 ? 8 : 5
+        return WorkoutRecommendation(
+            type: .quality, qualitySubtype: .overUnders,
+            title: title, summary: summary, reason: reason,
+            steps: [
+                WorkoutStep(role: .warmup, modality: .cycling, name: "Warm-up", durationText: "\(warmupMin) min", targetText: "Build from easy to steady, include 2 x 1 min openers"),
+                WorkoutStep(role: .primary, modality: .cycling, name: "Main Set", durationText: mainText.0, targetText: mainText.1),
+                WorkoutStep(role: .cooldown, modality: .cycling, name: "Cool down", durationText: "\(cooldownMin) min", targetText: "Easy spin")
+            ],
+            optionalExtras: []
+        )
+    }
+
+    // MARK: - Tier Resolution
+
+    /// Picks the highest tier (≤ requested) that fits in the available time.
+    /// Floors at starter.
+    private func resolveTier(
+        requested: ProgressionTier,
+        time: Int,
+        minimums: [ProgressionTier: Int]
+    ) -> ProgressionTier {
+        var current = requested
+        while current > .starter {
+            let need = minimums[current] ?? 0
+            if time >= need { return current }
+            current = current.previous()
+        }
+        return .starter
     }
 
     // MARK: - Equipment-Aware Extras

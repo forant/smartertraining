@@ -8,6 +8,7 @@ struct TodayView: View {
     @State private var showingRideSession = false
     @State private var showingEditor = false
     @State private var showingSettings = false
+    @State private var showingCoachNotes = false
     @State private var showingUpcomingContextAdd = false
     @State private var editingUpcomingContextEvent: UpcomingContextEvent?
     @State private var editor: WorkoutEditor?
@@ -24,6 +25,7 @@ struct TodayView: View {
                     if let todayRide {
                         CompletedHeroCard(
                             ride: todayRide,
+                            likelyTomorrow: likelyTomorrowPreview,
                             onViewSummary: { showingWorkoutDetail = true },
                             onStartAnother: { showingRideSession = true }
                         )
@@ -69,6 +71,10 @@ struct TodayView: View {
                         onEdit: { editingUpcomingContextEvent = $0 }
                     )
 
+                    CoachNotesEntryCard(notes: appState.coachNotes) {
+                        showingCoachNotes = true
+                    }
+
                     if todayRide == nil && !appState.currentRecommendation.optionalExtras.isEmpty {
                         OptionalExtrasCard(extras: appState.currentRecommendation.optionalExtras)
                     }
@@ -103,6 +109,11 @@ struct TodayView: View {
             .sheet(isPresented: $showingSettings) {
                 SettingsView(subscriptionService: subscriptionService)
             }
+            .sheet(isPresented: $showingCoachNotes) {
+                CoachNotesSheet(initialNotes: appState.coachNotes) { updated in
+                    appState.setCoachNotes(updated)
+                }
+            }
             .sheet(isPresented: $showingEditor) {
                 if let editor {
                     WorkoutEditorView(editor: editor)
@@ -127,7 +138,7 @@ struct TodayView: View {
             .sheet(isPresented: $showingWorkoutDetail) {
                 if let entry = todayHistoryEntry, let ride = todayRide {
                     NavigationStack {
-                        WorkoutDetailView(entry: entry, ride: ride)
+                        WorkoutDetailView(entry: entry, ride: ride, likelyTomorrow: likelyTomorrowPreview)
                             .toolbar {
                                 ToolbarItem(placement: .cancellationAction) {
                                     Button("Done") { showingWorkoutDetail = false }
@@ -169,6 +180,23 @@ struct TodayView: View {
         todayRide = appState.store.finishedRides().first {
             Calendar.current.isDateInToday($0.startDate)
         }
+    }
+
+    private var likelyTomorrowPreview: LikelyWorkoutPreview? {
+        guard let entry = todayHistoryEntry else { return nil }
+        let memory = TrainingMemoryBuilder.build(
+            history: appState.recentHistory,
+            rides: appState.store.finishedRides()
+        )
+        return LikelyTomorrowBuilder.preview(
+            sourceWorkoutType: entry.type,
+            sourceQualitySubtype: entry.qualitySubtype,
+            intent: appState.store.activeIntent(),
+            profile: appState.userProfile,
+            memory: memory,
+            upcoming: appState.upcomingContextSummary,
+            coachNotes: appState.coachNotes
+        )
     }
 
     // MARK: - Header
@@ -367,6 +395,7 @@ struct WorkoutHeroCard: View {
 
 struct CompletedHeroCard: View {
     let ride: CompletedWorkout
+    var likelyTomorrow: LikelyWorkoutPreview? = nil
     let onViewSummary: () -> Void
     let onStartAnother: () -> Void
 
@@ -392,6 +421,14 @@ struct CompletedHeroCard: View {
                 Text(summaryLine)
                     .font(.subheadline)
                     .foregroundStyle(Theme.TextStyle.onBrandSecondary)
+
+                if let likelyTomorrow {
+                    LikelyTomorrowInlineLabel(
+                        preview: likelyTomorrow,
+                        tint: Theme.TextStyle.onBrandSecondary
+                    )
+                    .padding(.top, 2)
+                }
             }
 
             Button(action: onViewSummary) {
@@ -741,6 +778,13 @@ struct HistoryRowView: View {
 
     private var isCompleted: Bool { entry.feedback != nil }
 
+    private var historyTypeLabel: String {
+        if let subtype = entry.qualitySubtype, entry.type == .quality {
+            return "\(entry.type.label) \u{00B7} \(subtype.label)"
+        }
+        return entry.type.label
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: isCompleted ? "checkmark.circle.fill" : "circle")
@@ -754,7 +798,7 @@ struct HistoryRowView: View {
                     .foregroundStyle(isCompleted ? .primary : .secondary)
 
                 HStack(spacing: 6) {
-                    Text(entry.type.label)
+                    Text(historyTypeLabel)
                         .font(.caption)
                         .foregroundStyle(isCompleted ? .secondary : .tertiary)
 

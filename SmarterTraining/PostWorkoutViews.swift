@@ -210,6 +210,7 @@ struct PostWorkoutSummaryCard: View {
 struct PostWorkoutReflectionCard: View {
     let reflection: PostWorkoutReflection
     let isLoading: Bool
+    var likelyTomorrow: LikelyWorkoutPreview? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -244,7 +245,10 @@ struct PostWorkoutReflectionCard: View {
                 reflectionRow(icon: "exclamationmark.triangle", color: .orange, text: watch)
             }
 
-            if !reflection.nextTwoDays.isEmpty {
+            if let likelyTomorrow {
+                Divider()
+                LikelyTomorrowCard(preview: likelyTomorrow)
+            } else if !reflection.nextTwoDays.isEmpty {
                 Divider()
 
                 VStack(alignment: .leading, spacing: 8) {

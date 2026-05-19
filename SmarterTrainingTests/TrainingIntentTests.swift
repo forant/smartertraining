@@ -198,6 +198,68 @@ struct TrainingIntentBuilderTests {
         #expect(intent.day1RecommendedIntensity == .endurance)
     }
 
+    // MARK: - Subtype-aware recovery cost
+
+    @Test func tempoSubtypeAllowsEnduranceNextDay() {
+        let intent = TrainingIntentBuilder.buildFromFeedback(
+            sourceWorkoutId: UUID(),
+            workoutCompletedAt: Date(),
+            workoutType: .quality,
+            qualitySubtype: .tempo,
+            feedback: .right,
+            perceivedEffort: 5
+        )
+        #expect(intent.day1RecommendedIntensity == .endurance)
+    }
+
+    @Test func vo2SubtypeForcesRecoveryNextDay() {
+        let intent = TrainingIntentBuilder.buildFromFeedback(
+            sourceWorkoutId: UUID(),
+            workoutCompletedAt: Date(),
+            workoutType: .quality,
+            qualitySubtype: .vo2,
+            feedback: .right,
+            perceivedEffort: 7
+        )
+        #expect(intent.day1RecommendedIntensity == .recovery)
+    }
+
+    @Test func thresholdSubtypeForcesRecoveryNextDay() {
+        let intent = TrainingIntentBuilder.buildFromFeedback(
+            sourceWorkoutId: UUID(),
+            workoutCompletedAt: Date(),
+            workoutType: .quality,
+            qualitySubtype: .threshold,
+            feedback: .right,
+            perceivedEffort: 7
+        )
+        #expect(intent.day1RecommendedIntensity == .recovery)
+    }
+
+    @Test func muscularEnduranceModerateCostAllowsEnduranceIfNotHard() {
+        let intent = TrainingIntentBuilder.buildFromFeedback(
+            sourceWorkoutId: UUID(),
+            workoutCompletedAt: Date(),
+            workoutType: .quality,
+            qualitySubtype: .muscularEndurance,
+            feedback: .right,
+            perceivedEffort: 6
+        )
+        #expect(intent.day1RecommendedIntensity == .endurance)
+    }
+
+    @Test func tempoWithHardFeedbackStillForcesRecovery() {
+        let intent = TrainingIntentBuilder.buildFromFeedback(
+            sourceWorkoutId: UUID(),
+            workoutCompletedAt: Date(),
+            workoutType: .quality,
+            qualitySubtype: .tempo,
+            feedback: .tooMuch,
+            perceivedEffort: 9
+        )
+        #expect(intent.day1RecommendedIntensity == .recovery)
+    }
+
     @Test func sanitizationBlocksQualityOnDay1() {
         let result = TrainingIntentBuilder.sanitizeIntensity(
             .quality, forDay: .day1, workoutType: .quality

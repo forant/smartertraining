@@ -58,7 +58,12 @@ struct TodayView: View {
                     coachExplanationCard
 
                     if todayRide == nil {
-                        WorkoutBreakdownCard(steps: appState.currentRecommendation.steps)
+                        ExecutionGuidanceCard(guidance: executionGuidance)
+
+                        WorkoutBreakdownCard(
+                            steps: appState.currentRecommendation.steps,
+                            totalDuration: hasCyclingSteps ? estimatedWorkoutDuration : nil
+                        )
                     }
 
                     WorkoutFeedbackCard(
@@ -266,6 +271,15 @@ struct TodayView: View {
 
     // MARK: - Helpers
 
+    private var executionGuidance: String {
+        ExecutionGuidanceBuilder.build(
+            recommendation: appState.currentRecommendation,
+            progression: appState.progressionState,
+            approach: appState.trainingApproach,
+            coachNotes: appState.coachNotes
+        )
+    }
+
     private var hasCyclingSteps: Bool {
         appState.currentRecommendation.steps.contains { $0.modality == .cycling || $0.modality == .recovery }
     }
@@ -354,7 +368,7 @@ struct WorkoutHeroCard: View {
                     .foregroundStyle(Theme.TextStyle.onBrandSecondary)
 
                 if let duration = estimatedDuration {
-                    Text("Done by \(Date().addingTimeInterval(duration).formatted(date: .omitted, time: .shortened))")
+                    Text("Done by \(Date().addingTimeInterval(duration).formatted(date: .omitted, time: .shortened)) if you start right now!")
                         .font(.caption)
                         .foregroundStyle(Theme.TextStyle.onBrandSecondary.opacity(0.8))
                 }
@@ -476,6 +490,7 @@ struct CompletedHeroCard: View {
 
 struct WorkoutBreakdownCard: View {
     let steps: [WorkoutStep]
+    var totalDuration: TimeInterval? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
@@ -494,6 +509,16 @@ struct WorkoutBreakdownCard: View {
                         .padding(.leading, 40)
                 }
             }
+
+            if let totalDuration, totalDuration > 0 {
+                Divider()
+                    .padding(.top, Theme.Spacing.xs)
+                Text("Total Workout Time: \(totalMinutesLabel(totalDuration))")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.top, 2)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Theme.Spacing.lg)
@@ -503,6 +528,11 @@ struct WorkoutBreakdownCard: View {
             RoundedRectangle(cornerRadius: Theme.Radius.lg)
                 .stroke(Theme.Border.subtle, lineWidth: Theme.Border.width)
         )
+    }
+
+    private func totalMinutesLabel(_ seconds: TimeInterval) -> String {
+        let minutes = Int((seconds / 60).rounded())
+        return "\(minutes) minute\(minutes == 1 ? "" : "s")"
     }
 }
 

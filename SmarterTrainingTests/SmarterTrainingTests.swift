@@ -576,6 +576,285 @@ struct OverUnderConverterTests {
     }
 }
 
+// MARK: - Execution Guidance ("What matters today")
+
+struct ExecutionGuidanceTests {
+
+    private func recommendation(type: WorkoutType, subtype: QualitySubtype? = nil) -> WorkoutRecommendation {
+        WorkoutRecommendation(
+            type: type,
+            qualitySubtype: subtype,
+            title: "Test",
+            summary: "Test",
+            reason: "Test",
+            steps: [],
+            optionalExtras: []
+        )
+    }
+
+    // MARK: Coverage
+
+    @Test func everyWorkoutTypeProducesNonEmptyGuidance() {
+        for type in [WorkoutType.recovery, .endurance, .quality] {
+            let rec = recommendation(type: type, subtype: type == .quality ? .threshold : nil)
+            let text = ExecutionGuidanceBuilder.build(recommendation: rec)
+            #expect(!text.isEmpty)
+        }
+    }
+
+    @Test func everyQualitySubtypeProducesDistinctGuidance() {
+        var texts: Set<String> = []
+        for subtype in QualitySubtype.allCases {
+            let rec = recommendation(type: .quality, subtype: subtype)
+            let text = ExecutionGuidanceBuilder.build(recommendation: rec)
+            texts.insert(text)
+        }
+        // Each subtype should produce a distinct baseline.
+        #expect(texts.count == QualitySubtype.allCases.count)
+    }
+
+    // MARK: Subtype-specific language
+
+    @Test func vo2GuidanceMentionsRepeatability() {
+        let text = ExecutionGuidanceBuilder.build(recommendation: recommendation(type: .quality, subtype: .vo2))
+        #expect(text.lowercased().contains("repeatable"))
+    }
+
+    @Test func thresholdGuidanceMentionsSustainedOrControlled() {
+        let text = ExecutionGuidanceBuilder.build(recommendation: recommendation(type: .quality, subtype: .threshold))
+        let lower = text.lowercased()
+        #expect(lower.contains("sustained") || lower.contains("controlled"))
+    }
+
+    @Test func meGuidanceMentionsSustainedPressure() {
+        let text = ExecutionGuidanceBuilder.build(recommendation: recommendation(type: .quality, subtype: .muscularEndurance))
+        #expect(text.lowercased().contains("sustained"))
+    }
+
+    @Test func tempoGuidanceMentionsSteady() {
+        let text = ExecutionGuidanceBuilder.build(recommendation: recommendation(type: .quality, subtype: .tempo))
+        #expect(text.lowercased().contains("steady"))
+    }
+
+    @Test func overUndersGuidanceMentionsControl() {
+        let text = ExecutionGuidanceBuilder.build(recommendation: recommendation(type: .quality, subtype: .overUnders))
+        #expect(text.lowercased().contains("control"))
+    }
+
+    @Test func recoveryGuidanceMentionsCirculationOrRecovery() {
+        let text = ExecutionGuidanceBuilder.build(recommendation: recommendation(type: .recovery))
+        let lower = text.lowercased()
+        #expect(lower.contains("circulation") || lower.contains("recovery"))
+    }
+
+    @Test func enduranceGuidanceMentionsConversationalOrRelaxed() {
+        let text = ExecutionGuidanceBuilder.build(recommendation: recommendation(type: .endurance))
+        let lower = text.lowercased()
+        #expect(lower.contains("conversational") || lower.contains("relaxed"))
+    }
+
+    // MARK: Tier modifiers
+
+    @Test func starterTierAddsPacingRestraintLanguage() {
+        var progression = ProgressionState.empty
+        // Starter is default
+        let text = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .vo2),
+            progression: progression
+        )
+        #expect(text.lowercased().contains("conservative") || text.lowercased().contains("feel for"))
+
+        // Avoid unused-variable warning
+        progression = progression.applying(signal: .confidentSuccess, to: .vo2)
+        _ = progression
+    }
+
+    @Test func stableTierAddsSmoothnessLanguage() {
+        var progression = ProgressionState.empty
+        for _ in 0..<4 {
+            progression = progression.applying(signal: .confidentSuccess, to: .vo2)
+        }
+        #expect(progression.tier(for: .vo2) == .stable)
+        let text = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .vo2),
+            progression: progression
+        )
+        #expect(text.lowercased().contains("smoothness") || text.lowercased().contains("smooth"))
+    }
+
+    @Test func progressingTierAddsNoTierModifier() {
+        var progression = ProgressionState.empty
+        progression = progression.applying(signal: .confidentSuccess, to: .vo2)
+        progression = progression.applying(signal: .confidentSuccess, to: .vo2)
+        #expect(progression.tier(for: .vo2) == .progressing)
+        let base = ExecutionGuidanceBuilder.build(recommendation: recommendation(type: .quality, subtype: .vo2))
+        let progressing = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .vo2),
+            progression: progression
+        )
+        // Starter adds a line. Progressing should match the no-progression baseline minus that addition.
+        // Use length proxy: progressing < starter baseline (which has the line)
+        #expect(progressing.count < base.count)
+    }
+
+    @Test func advancedTierAddsComposureLanguage() {
+        var progression = ProgressionState.empty
+        for _ in 0..<8 {
+            progression = progression.applying(signal: .confidentSuccess, to: .vo2)
+        }
+        #expect(progression.tier(for: .vo2) == .advanced)
+        let text = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .vo2),
+            progression: progression
+        )
+        #expect(text.lowercased().contains("composure"))
+    }
+
+    // MARK: Training approach
+
+    @Test func sustainableAddsReserveLanguage() {
+        let text = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .threshold),
+            approach: .sustainable
+        )
+        #expect(text.lowercased().contains("reserve"))
+    }
+
+    @Test func ambitiousAddsLeanInLanguage() {
+        let text = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .threshold),
+            approach: .ambitious
+        )
+        #expect(text.lowercased().contains("lean into"))
+    }
+
+    @Test func balancedAddsNoApproachModifier() {
+        let balanced = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .threshold),
+            approach: .balanced
+        )
+        let ambitious = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .threshold),
+            approach: .ambitious
+        )
+        #expect(balanced.count < ambitious.count)
+    }
+
+    // MARK: Coach notes
+
+    @Test func legsFatigueFirstShapesMEGuidance() {
+        var notes = CoachNotes.empty
+        notes.tags = [.legsFatigueFirst]
+        let text = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .muscularEndurance),
+            coachNotes: notes
+        )
+        #expect(text.lowercased().contains("limiter") || text.lowercased().contains("pace the legs"))
+    }
+
+    @Test func kneeSensitivityShapesGrindingLanguage() {
+        var notes = CoachNotes.empty
+        notes.tags = [.kneeSensitivity]
+        let text = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .muscularEndurance),
+            coachNotes: notes
+        )
+        #expect(text.lowercased().contains("grinding") || text.lowercased().contains("cadence"))
+    }
+
+    @Test func vo2MentallyDifficultSoftensVO2() {
+        var notes = CoachNotes.empty
+        notes.tags = [.vo2MentallyDifficult]
+        let text = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .vo2),
+            coachNotes: notes
+        )
+        #expect(text.lowercased().contains("discomfort"))
+    }
+
+    @Test func kneeNoteDoesNotInfluenceTempo() {
+        var notes = CoachNotes.empty
+        notes.tags = [.kneeSensitivity]
+        let baseline = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .tempo)
+        )
+        let withNote = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .quality, subtype: .tempo),
+            coachNotes: notes
+        )
+        // Tempo is not a low-cadence subtype, so the knee note shouldn't fire.
+        #expect(baseline == withNote)
+    }
+
+    // MARK: Recovery + endurance ignore quality modifiers
+
+    @Test func recoveryGuidanceIgnoresProgressionFraming() {
+        var progression = ProgressionState.empty
+        for _ in 0..<8 {
+            progression = progression.applying(signal: .confidentSuccess, to: .vo2)
+        }
+        let text = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .recovery),
+            progression: progression,
+            approach: .ambitious
+        )
+        // Recovery should not adopt advanced/ambitious quality framing.
+        #expect(!text.lowercased().contains("composure"))
+        #expect(!text.lowercased().contains("lean into"))
+    }
+
+    @Test func enduranceGuidanceIgnoresApproachModifier() {
+        let balanced = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .endurance), approach: .balanced
+        )
+        let ambitious = ExecutionGuidanceBuilder.build(
+            recommendation: recommendation(type: .endurance), approach: .ambitious
+        )
+        #expect(balanced == ambitious)
+    }
+
+    // MARK: Length + tone
+
+    @Test func guidanceStaysUnderMaxLength() {
+        // Stack every layer at once and verify the clamp holds.
+        var progression = ProgressionState.empty
+        for _ in 0..<8 { progression = progression.applying(signal: .confidentSuccess, to: .muscularEndurance) }
+        var notes = CoachNotes.empty
+        notes.tags = [.legsFatigueFirst, .kneeSensitivity]
+        for subtype in QualitySubtype.allCases {
+            let text = ExecutionGuidanceBuilder.build(
+                recommendation: recommendation(type: .quality, subtype: subtype),
+                progression: progression,
+                approach: .ambitious,
+                coachNotes: notes
+            )
+            #expect(text.count <= ExecutionGuidanceBuilder.maxLength)
+        }
+    }
+
+    @Test func noMachoLanguageAppearsAnywhere() {
+        let blacklist = ["crush", "destroy", "beast", "empty the tank", "punish", "hardcore"]
+        var progression = ProgressionState.empty
+        for _ in 0..<8 { progression = progression.applying(signal: .confidentSuccess, to: .vo2) }
+
+        for type in [WorkoutType.recovery, .endurance, .quality] {
+            for subtype in (type == .quality ? QualitySubtype.allCases : [QualitySubtype.threshold]) {
+                for approach in TrainingApproach.allCases {
+                    let text = ExecutionGuidanceBuilder.build(
+                        recommendation: recommendation(type: type, subtype: type == .quality ? subtype : nil),
+                        progression: progression,
+                        approach: approach
+                    )
+                    let lower = text.lowercased()
+                    for term in blacklist {
+                        #expect(!lower.contains(term))
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Training Approach
 
 struct TrainingApproachTests {

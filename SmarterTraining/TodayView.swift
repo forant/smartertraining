@@ -10,6 +10,9 @@ struct TodayView: View {
     @State private var showingSettings = false
     @State private var showingCoachNotes = false
     @State private var showingUpcomingContextAdd = false
+    #if DEBUG
+    @State private var showingScreenshotPostWorkout = false
+    #endif
     @State private var editingUpcomingContextEvent: UpcomingContextEvent?
     @State private var editor: WorkoutEditor?
     @State private var aiCoach = AICoachService()
@@ -21,76 +24,10 @@ struct TodayView: View {
             ScrollView {
                 VStack(spacing: Theme.Spacing.lg) {
                     header
-
-                    if let todayRide {
-                        CompletedHeroCard(
-                            ride: todayRide,
-                            likelyTomorrow: likelyTomorrowPreview,
-                            onViewSummary: { showingWorkoutDetail = true },
-                            onStartAnother: { showingRideSession = true }
-                        )
-
-                        if !todayRide.samples.isEmpty {
-                            WorkoutChartsSection(workout: todayRide)
-                        }
-                    } else {
-                        WorkoutHeroCard(
-                            recommendation: appState.currentRecommendation,
-                            isModified: editor?.isModified == true,
-                            hasCyclingSteps: hasCyclingSteps,
-                            estimatedDuration: hasCyclingSteps ? estimatedWorkoutDuration : nil,
-                            onStart: {
-                                AnalyticsService.shared.track(.workoutStartTapped, properties: [
-                                    "workout_type": appState.currentRecommendation.type.rawValue
-                                ])
-                                showingRideSession = true
-                            },
-                            onEdit: hasCyclingSteps ? {
-                                ensureEditor()
-                                showingEditor = true
-                                AnalyticsService.shared.track(.workoutEditorOpened)
-                            } : nil
-                        )
-                        .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.type)
-                        .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.title)
-                    }
-
-                    coachExplanationCard
-
-                    if todayRide == nil {
-                        ExecutionGuidanceCard(guidance: executionGuidance)
-
-                        WorkoutBreakdownCard(
-                            steps: appState.currentRecommendation.steps,
-                            totalDuration: hasCyclingSteps ? estimatedWorkoutDuration : nil
-                        )
-                    }
-
-                    WorkoutFeedbackCard(
-                        selectedFeedback: appState.todayFeedback,
-                        onSelect: { appState.submitFeedback($0) }
-                    )
-
-                    UpcomingContextCard(
-                        onAdd: { showingUpcomingContextAdd = true },
-                        onEdit: { editingUpcomingContextEvent = $0 }
-                    )
-
-                    CoachNotesEntryCard(notes: appState.coachNotes) {
-                        showingCoachNotes = true
-                    }
-
-                    if todayRide == nil && !appState.currentRecommendation.optionalExtras.isEmpty {
-                        OptionalExtrasCard(extras: appState.currentRecommendation.optionalExtras)
-                    }
-
-                    if let checkIn = appState.latestCheckIn {
-                        CheckInSummaryCard(checkIn: checkIn) {
-                            showingCheckIn = true
-                        }
-                    }
-
-                    historyButton
+                    heroSection
+                    preWorkoutSection
+                    feedbackAndContextSection
+                    extrasAndHistorySection
                 }
                 .padding()
             }
@@ -154,7 +91,25 @@ struct TodayView: View {
             }
             .onAppear {
                 loadTodayRide()
+                #if DEBUG
+                if ScreenshotSeeder.scenario(from: ProcessInfo.processInfo.arguments) == .postWorkoutSummary,
+                   todayRide != nil {
+                    showingScreenshotPostWorkout = true
+                }
+                #endif
             }
+            #if DEBUG
+            .fullScreenCover(isPresented: $showingScreenshotPostWorkout) {
+                if let ride = todayRide {
+                    RideSessionView(
+                        previewSummaryWith: appState.currentRecommendation,
+                        ftp: appState.userProfile.ftp ?? 240,
+                        completedWorkout: ride
+                    )
+                    .environment(appState)
+                }
+            }
+            #endif
             .onChange(of: showingRideSession) { _, isShowing in
                 if !isShowing { loadTodayRide() }
             }
@@ -179,6 +134,84 @@ struct TodayView: View {
 
     private var todayHistoryEntry: WorkoutHistoryEntry? {
         appState.recentHistory.last { Calendar.current.isDateInToday($0.date) }
+    }
+
+    @ViewBuilder
+    private var preWorkoutSection: some View {
+        if todayRide == nil {
+            coachExplanationCard
+            ExecutionGuidanceCard(guidance: executionGuidance)
+            WorkoutBreakdownCard(
+                steps: appState.currentRecommendation.steps,
+                totalDuration: hasCyclingSteps ? estimatedWorkoutDuration : nil
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var feedbackAndContextSection: some View {
+        if todayRide != nil || appState.todayFeedback != nil {
+            WorkoutFeedbackCard(
+                selectedFeedback: appState.todayFeedback,
+                onSelect: { appState.submitFeedback($0) }
+            )
+        }
+
+        UpcomingContextCard(
+            onAdd: { showingUpcomingContextAdd = true },
+            onEdit: { editingUpcomingContextEvent = $0 }
+        )
+
+        CoachNotesEntryCard(notes: appState.coachNotes) {
+            showingCoachNotes = true
+        }
+    }
+
+    @ViewBuilder
+    private var extrasAndHistorySection: some View {
+        if todayRide == nil && !appState.currentRecommendation.optionalExtras.isEmpty {
+            OptionalExtrasCard(extras: appState.currentRecommendation.optionalExtras)
+        }
+
+        if let checkIn = appState.latestCheckIn {
+            CheckInSummaryCard(checkIn: checkIn) {
+                showingCheckIn = true
+            }
+        }
+
+        historyButton
+    }
+
+    @ViewBuilder
+    private var heroSection: some View {
+        if let todayRide {
+            CompletedHeroCard(
+                ride: todayRide,
+                likelyTomorrow: likelyTomorrowPreview,
+                onViewSummary: { showingWorkoutDetail = true },
+                onStartAnother: { showingRideSession = true }
+            )
+        } else {
+            WorkoutHeroCard(
+                recommendation: appState.currentRecommendation,
+                isModified: editor?.isModified == true,
+                hasCyclingSteps: hasCyclingSteps,
+                estimatedDuration: hasCyclingSteps ? estimatedWorkoutDuration : nil,
+                onStart: {
+                    AnalyticsService.shared.track(.workoutStartTapped, properties: [
+                        "workout_type": appState.currentRecommendation.type.rawValue
+                    ])
+                    showingRideSession = true
+                },
+                onEdit: hasCyclingSteps ? {
+                    ensureEditor()
+                    showingEditor = true
+                    AnalyticsService.shared.track(.workoutEditorOpened)
+                } : nil
+            )
+            .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.type)
+            .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.title)
+        }
     }
 
     private func loadTodayRide() {

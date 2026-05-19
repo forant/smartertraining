@@ -72,6 +72,11 @@ final class LocalStore {
             .sorted { $0.startDate > $1.startDate }
     }
 
+    func deleteRide(id: UUID) {
+        let url = rideURL(for: id)
+        try? FileManager.default.removeItem(at: url)
+    }
+
     // MARK: - Training Intent
 
     private var intentURL: URL {

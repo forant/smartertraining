@@ -1026,4 +1026,169 @@ struct RideSessionView: View {
     private func estimatedEndTime(in seconds: TimeInterval) -> String {
         Date().addingTimeInterval(max(0, seconds)).formatted(date: .omitted, time: .shortened)
     }
+
+    // Production init (kept explicit because the debug preview init below
+    // would otherwise suppress the synthesized memberwise init).
+    init(
+        recommendation: WorkoutRecommendation,
+        ftp: Int?,
+        checkIn: CheckIn? = nil,
+        recentHistory: [WorkoutHistoryEntry] = [],
+        profile: UserProfile = .empty,
+        existingEditor: WorkoutEditor? = nil
+    ) {
+        self.recommendation = recommendation
+        self.ftp = ftp
+        self.checkIn = checkIn
+        self.recentHistory = recentHistory
+        self.profile = profile
+        self.existingEditor = existingEditor
+    }
+
+    #if DEBUG
+    /// Builds a RideSessionView frozen in the `.riding` phase with a pre-populated
+    /// runtime. For SwiftUI previews / App Store screenshots only.
+    init(
+        previewRunningWith recommendation: WorkoutRecommendation,
+        ftp: Int,
+        runtime: TrainerWorkoutRuntime
+    ) {
+        self.recommendation = recommendation
+        self.ftp = ftp
+        self.checkIn = nil
+        self.recentHistory = []
+        self.profile = .empty
+        self.existingEditor = nil
+        _phase = State(wrappedValue: .riding)
+        _runtime = State(wrappedValue: runtime)
+    }
+
+    /// Builds a RideSessionView frozen in the post-workout summary phase with a
+    /// pre-populated completed workout and optional AI reflection.
+    init(
+        previewSummaryWith recommendation: WorkoutRecommendation,
+        ftp: Int,
+        completedWorkout: CompletedWorkout,
+        reflection: PostWorkoutReflection? = nil
+    ) {
+        self.recommendation = recommendation
+        self.ftp = ftp
+        self.checkIn = nil
+        self.recentHistory = []
+        self.profile = .empty
+        self.existingEditor = nil
+        _phase = State(wrappedValue: .finished)
+        _finishedPhase = State(wrappedValue: .summary)
+        _completedWorkout = State(wrappedValue: completedWorkout)
+        if let reflection {
+            let service = PostWorkoutReflectionService()
+            service._previewSetReflection(reflection)
+            _reflectionService = State(wrappedValue: service)
+        }
+    }
+    #endif
 }
+
+#if DEBUG
+#Preview("Live workout — mid threshold interval") {
+    // Build the same recommendation the engine produces at progressing tier.
+    let engine = RecommendationEngine()
+    let recommendation = engine.buildWorkout(
+        type: .quality,
+        subtype: .threshold,
+        time: 45,
+        reason: "Threshold work builds the ceiling: sustained efforts right at your limit."
+    )
+    let ftp = 240
+    let trainerSteps = WorkoutConverter.convert(recommendation: recommendation, ftp: ftp)
+
+    // Sit mid-way through the second 5-min interval (~18 min in), with realistic
+    // sample history so the live chart looks believable.
+    let startedAgo: TimeInterval = 18 * 60
+    let stepElapsed: TimeInterval = 2 * 60 + 15
+    let intervalStepIndex = max(0, trainerSteps.firstIndex(where: { $0.name.contains("Interval 2") }) ?? 3)
+
+    let now = Date()
+    let samples: [TrainerMetrics] = stride(from: 0, to: Int(startedAgo), by: 1).map { second in
+        let t = TimeInterval(second)
+        let wobble = Double(((second * 9301) + 49297) % 233) / 233.0
+        let noise = (wobble - 0.5) * 2.0
+        // Coarse shape: warmup ramps for 600s, then alternating interval/recovery.
+        let power: Int
+        let hr: Int
+        let cadence: Double
+        if t < 600 {
+            let p = t / 600.0
+            power = Int(120 + 80 * p + noise * 6)
+            hr = Int(108 + 40 * p + noise * 3)
+            cadence = 85 + noise * 2
+        } else {
+            let cycle = Int((t - 600) / 480) // 5 min interval + 3 min rest
+            let onInterval = ((t - 600).truncatingRemainder(dividingBy: 480)) < 300
+            if onInterval {
+                power = Int(Double(ftp) * 0.975) + Int(noise * 8)
+                hr = Int(165 + Double(cycle) * 2 + noise * 3)
+                cadence = 90 + noise * 2
+            } else {
+                power = Int(Double(ftp) * 0.55) + Int(noise * 6)
+                hr = Int(150 - Double(cycle) + noise * 3)
+                cadence = 85 + noise * 3
+            }
+        }
+        return TrainerMetrics(
+            power: power,
+            cadence: cadence,
+            speed: nil,
+            heartRate: hr,
+            timestamp: now.addingTimeInterval(t - startedAgo)
+        )
+    }
+
+    let runtime = TrainerWorkoutRuntime.previewMidWorkout(
+        steps: trainerSteps,
+        currentStepIndex: intervalStepIndex,
+        stepElapsed: stepElapsed,
+        totalElapsed: startedAgo,
+        samples: samples
+    )
+
+    return RideSessionView(
+        previewRunningWith: recommendation,
+        ftp: ftp,
+        runtime: runtime
+    )
+    .environment(AppState())
+}
+
+#Preview("Post-workout summary — threshold, with reflection") {
+    let engine = RecommendationEngine()
+    let recommendation = engine.buildWorkout(
+        type: .quality,
+        subtype: .threshold,
+        time: 45,
+        reason: "Threshold work builds the ceiling: sustained efforts right at your limit."
+    )
+    let ftp = 240
+    let startedAt = Date().addingTimeInterval(-50 * 60)
+    let completed = ScreenshotFactory.completedThresholdRide(startedAt: startedAt, ftp: ftp)
+
+    // AI reflection lets the full PostWorkoutReflectionCard render with the embedded LikelyTomorrow.
+    let reflection = PostWorkoutReflection(
+        sessionEvaluation: "Strong, controlled session. The pacing held together across every interval, and the late-interval HR drift was modest — a sign your engine is absorbing this kind of work.",
+        whatWentWell: "Steady output across all four intervals, with cadence sitting where it should.",
+        watchOut: "Last interval HR drifted a touch — worth noting if it repeats.",
+        nextTwoDays: [],
+        confidence: "high",
+        isFallback: false,
+        generatedAt: Date()
+    )
+
+    return RideSessionView(
+        previewSummaryWith: recommendation,
+        ftp: ftp,
+        completedWorkout: completed,
+        reflection: reflection
+    )
+    .environment(AppState())
+}
+#endif

@@ -7,6 +7,13 @@ final class PostWorkoutReflectionService {
     private(set) var reflection: PostWorkoutReflection?
     private(set) var isLoading = false
 
+    #if DEBUG
+    /// Pre-seeds a reflection for SwiftUI previews. Production code never calls this.
+    func _previewSetReflection(_ value: PostWorkoutReflection) {
+        reflection = value
+    }
+    #endif
+
     func fetchReflection(
         workout: CompletedWorkout,
         recommendation: WorkoutRecommendation,

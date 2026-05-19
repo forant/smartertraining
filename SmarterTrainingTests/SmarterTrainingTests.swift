@@ -576,6 +576,149 @@ struct OverUnderConverterTests {
     }
 }
 
+// MARK: - Screenshot Seeding (DEBUG-only)
+
+struct ScreenshotSeederTests {
+
+    // MARK: Launch-arg parsing
+
+    @Test func parsesTodayRecommendationArg() {
+        let scenario = ScreenshotSeeder.scenario(from: ["app", "-seedTodayRecommendation"])
+        #expect(scenario == .todayRecommendation)
+    }
+
+    @Test func parsesAdaptiveCoachingArg() {
+        let scenario = ScreenshotSeeder.scenario(from: ["app", "-seedAdaptiveCoaching"])
+        #expect(scenario == .adaptiveCoaching)
+    }
+
+    @Test func unknownArgReturnsNil() {
+        let scenario = ScreenshotSeeder.scenario(from: ["app", "-randomArg"])
+        #expect(scenario == nil)
+    }
+
+    @Test func emptyArgsReturnsNil() {
+        let scenario = ScreenshotSeeder.scenario(from: [])
+        #expect(scenario == nil)
+    }
+
+    @Test func appearanceOverrideParsesLight() {
+        let override = ScreenshotSeeder.appearanceOverride(from: ["-forceLightMode"])
+        #expect(override == .forceLightMode)
+    }
+
+    @Test func appearanceOverrideParsesDark() {
+        let override = ScreenshotSeeder.appearanceOverride(from: ["-forceDarkMode"])
+        #expect(override == .forceDarkMode)
+    }
+
+    // MARK: Seed construction
+
+    @Test func everyScenarioProducesNonEmptySeed() {
+        for scenario in ScreenshotSeeder.Scenario.allCases {
+            let seed = ScreenshotSeeder.build(scenario)
+            #expect(seed.profile != nil)
+            #expect(seed.checkIn != nil)
+        }
+    }
+
+    @Test func todayRecommendationSeedHasStableProgression() {
+        let seed = ScreenshotSeeder.build(.todayRecommendation)
+        // Stable progression should include at least one stable-or-better subtype.
+        #expect(seed.progressionState.stableOrBetterSubtypeCount >= 1)
+    }
+
+    @Test func adaptiveCoachingSeedIncludesCompletedRide() {
+        let seed = ScreenshotSeeder.build(.adaptiveCoaching)
+        #expect(!seed.rides.isEmpty)
+        #expect(seed.rides.first?.coachReflection != nil)
+        #expect(seed.approach == .ambitious)
+    }
+
+    @Test func recoveryDaySeedUsesSustainableApproach() {
+        let seed = ScreenshotSeeder.build(.recoveryDay)
+        #expect(seed.approach == .sustainable)
+        #expect(seed.checkIn?.contextFlags.contains("Poor sleep") == true)
+    }
+
+    @Test func progressionSeedHasAdvancedTier() {
+        let seed = ScreenshotSeeder.build(.progression)
+        // Advanced progression has at least one subtype at .stable or better.
+        #expect(seed.progressionState.stableOrBetterSubtypeCount >= 1)
+        #expect(seed.approach == .ambitious)
+    }
+
+    @Test func coachSettingsSeedPopulatesNotes() {
+        let seed = ScreenshotSeeder.build(.coachSettings)
+        #expect(!seed.coachNotes.isEmpty)
+    }
+}
+
+// MARK: - Screenshot Factory
+
+struct ScreenshotFactoryTests {
+
+    @Test func realisticHistorySpansSevenDays() {
+        let history = ScreenshotFactory.realisticRecentHistory()
+        // 6 entries spanning days -6 through -1.
+        #expect(history.count == 6)
+    }
+
+    @Test func realisticHistoryIncludesQualityWithSubtype() {
+        let history = ScreenshotFactory.realisticRecentHistory()
+        let qualityEntry = history.first { $0.type == .quality }
+        #expect(qualityEntry?.qualitySubtype != nil)
+    }
+
+    @Test func completedRideHasRealisticSamples() {
+        let ride = ScreenshotFactory.completedThresholdRide(
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            ftp: 240
+        )
+        // Should have ~45 min of 1Hz samples = 2700.
+        #expect(ride.samples.count >= 2700)
+        // Power, HR, and cadence should all be populated.
+        #expect(ride.samples.contains { $0.power != nil && ($0.power ?? 0) > 0 })
+        #expect(ride.samples.contains { $0.heartRate != nil && ($0.heartRate ?? 0) > 0 })
+        #expect(ride.samples.contains { $0.cadence != nil && ($0.cadence ?? 0) > 0 })
+        // Averages computed.
+        #expect(ride.averagePower != nil)
+        #expect(ride.averageHeartRate != nil)
+    }
+
+    @Test func powersStayInBelievableRange() {
+        let ride = ScreenshotFactory.completedThresholdRide(
+            startedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            ftp: 240
+        )
+        let powers = ride.samples.compactMap(\.power).filter { $0 > 0 }
+        let max = powers.max() ?? 0
+        // 240 FTP, threshold session — max should never exceed ~270W.
+        #expect(max <= 270)
+        // Average should land near threshold-session expectations (130–220W mixed).
+        if let avg = ride.averagePower {
+            #expect(avg >= 100 && avg <= 220)
+        }
+    }
+
+    @Test func sampleGenerationIsDeterministic() {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let a = ScreenshotFactory.completedThresholdRide(startedAt: start, ftp: 240)
+        let b = ScreenshotFactory.completedThresholdRide(startedAt: start, ftp: 240)
+        // Same start time + FTP should produce identical sample shapes.
+        #expect(a.samples.count == b.samples.count)
+        if !a.samples.isEmpty {
+            #expect(a.samples.first?.power == b.samples.first?.power)
+            #expect(a.samples.last?.power == b.samples.last?.power)
+        }
+    }
+
+    @Test func stableProgressionHasAtLeastOneStableSubtype() {
+        let state = ScreenshotFactory.stableProgression()
+        #expect(state.stableOrBetterSubtypeCount >= 1)
+    }
+}
+
 // MARK: - Execution Guidance ("What matters today")
 
 struct ExecutionGuidanceTests {

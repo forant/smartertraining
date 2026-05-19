@@ -358,6 +358,10 @@ final class AppState {
             todayFeedback = last.feedback
         }
         sync = BackendSyncService(auth: auth, store: store)
+
+        #if DEBUG
+        ScreenshotSeeder.applyIfRequested(to: self)
+        #endif
     }
 
     func completeOnboarding(profile: UserProfile) {
@@ -552,6 +556,46 @@ final class AppState {
         RememberedDeviceStore.shared.forgetHRM()
     }
 
+    #if DEBUG
+    /// Debug-only bulk seed for App Store screenshot scenarios. Wipes existing
+    /// state and replaces it with the seed's contents. Persists to the real
+    /// local store + UserDefaults so the app launches into the seeded state.
+    /// This must never be called in production.
+    func applyScreenshotSeed(_ seed: ScreenshotSeed) {
+        deleteAllLocalData()
+
+        if let profile = seed.profile {
+            completeOnboarding(profile: profile)
+        }
+        if !seed.coachNotes.isEmpty {
+            setCoachNotes(seed.coachNotes)
+        }
+        if seed.approach != .default {
+            setTrainingApproach(seed.approach)
+        }
+        if seed.progressionState != .empty {
+            progressionState = seed.progressionState
+            persistProgressionState()
+        }
+        if !seed.history.isEmpty {
+            recentHistory = seed.history
+            store.saveWorkouts(seed.history)
+        }
+        for ride in seed.rides {
+            store.saveRide(ride)
+        }
+        if let intent = seed.intent {
+            store.saveIntent(intent)
+        }
+        if let checkIn = seed.checkIn {
+            submit(checkIn: checkIn)
+        }
+        if let feedback = seed.feedback {
+            submitFeedback(feedback)
+        }
+    }
+    #endif
+
     private func refreshRecommendationIfCheckedIn() {
         if let checkIn = latestCheckIn, hasCheckedInToday {
             currentRecommendation = generateRecommendation(for: checkIn)
@@ -566,6 +610,16 @@ final class AppState {
         currentRecommendation = .preview
         defaults.removeObject(forKey: Keys.checkIn)
         defaults.removeObject(forKey: Keys.checkInDate)
+
+        // Also clear any completed rides logged today so the CompletedHeroCard
+        // doesn't linger on the Today screen.
+        let cal = Calendar.current
+        for ride in store.finishedRides() where cal.isDateInToday(ride.startDate) {
+            store.deleteRide(id: ride.id)
+        }
+        // Drop today's history entry too so memory + UI stay aligned.
+        recentHistory.removeAll { cal.isDateInToday($0.date) }
+        store.saveWorkouts(Array(recentHistory))
     }
 
     func resetOnboarding() {

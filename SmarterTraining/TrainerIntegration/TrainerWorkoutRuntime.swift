@@ -121,6 +121,27 @@ final class TrainerWorkoutRuntime {
         startTimer()
     }
 
+    #if DEBUG
+    /// Builds a runtime pre-positioned mid-workout for SwiftUI previews.
+    /// Does NOT start the timer — the preview captures a single frozen frame.
+    static func previewMidWorkout(
+        steps: [TrainerWorkoutStep],
+        currentStepIndex: Int,
+        stepElapsed: TimeInterval,
+        totalElapsed: TimeInterval,
+        samples: [TrainerMetrics]
+    ) -> TrainerWorkoutRuntime {
+        let r = TrainerWorkoutRuntime(steps: steps, trainerManager: nil)
+        r.currentStepIndex = currentStepIndex
+        r.stepElapsed = stepElapsed
+        r.totalElapsed = totalElapsed
+        r.samples = samples
+        r.startDate = Date().addingTimeInterval(-totalElapsed)
+        r.state = .running
+        return r
+    }
+    #endif
+
     func pause() {
         guard state == .running else { return }
         state = .paused

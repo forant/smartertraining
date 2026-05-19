@@ -14,6 +14,7 @@ struct SmarterTrainingApp: App {
             ContentView(subscriptionService: subscriptionService)
                 .environment(appState)
                 .tint(Theme.Brand.primary)
+                .preferredColorScheme(screenshotColorScheme)
                 .onAppear {
                     AnalyticsService.shared.track(.appOpened)
                     if let userId = appState.auth.userId {
@@ -22,5 +23,17 @@ struct SmarterTrainingApp: App {
                     }
                 }
         }
+    }
+
+    private var screenshotColorScheme: ColorScheme? {
+        #if DEBUG
+        switch ScreenshotSeeder.appearanceOverride() {
+        case .forceLightMode: return .light
+        case .forceDarkMode: return .dark
+        case nil: return nil
+        }
+        #else
+        return nil
+        #endif
     }
 }

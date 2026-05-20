@@ -29,4 +29,4 @@ DerivedData/
 
 # Optional local backend artifacts
 *.sqlite
-*.sqlite3
+*.sqlite3.sentryclirc

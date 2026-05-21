@@ -128,7 +128,7 @@ struct AnalyticsEventTests {
             .upcomingContextAdded, .upcomingContextEdited, .upcomingContextDeleted,
             .notificationPermissionRequested, .notificationPermissionGranted, .notificationPermissionDenied,
             .coachingNotificationScheduled,
-            .paywallViewed, .freeFounderSelected,
+            .paywallViewed,
             .purchaseMonthlyTapped, .purchaseAnnualTapped,
             .purchaseSucceeded, .purchaseCancelled, .purchaseFailed,
             .restoreTapped, .restoreSucceeded, .restoreFailed,

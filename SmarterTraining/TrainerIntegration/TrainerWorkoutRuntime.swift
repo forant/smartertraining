@@ -124,6 +124,8 @@ final class TrainerWorkoutRuntime {
     #if DEBUG
     /// Builds a runtime pre-positioned mid-workout for SwiftUI previews.
     /// Does NOT start the timer — the preview captures a single frozen frame.
+    /// Seeds the power smoother with the most recent samples so `smoothedPower`
+    /// returns a value immediately (otherwise the metric panel shows "--").
     static func previewMidWorkout(
         steps: [TrainerWorkoutStep],
         currentStepIndex: Int,
@@ -138,6 +140,16 @@ final class TrainerWorkoutRuntime {
         r.samples = samples
         r.startDate = Date().addingTimeInterval(-totalElapsed)
         r.state = .running
+
+        // Feed the last ~6s of power samples into the smoother so the live
+        // metric panel renders a real wattage on the first frame.
+        let now = Date()
+        for sample in samples.suffix(8) {
+            if let watts = sample.power, watts > 0 {
+                r.powerSmoother.add(watts, at: now)
+            }
+        }
+
         return r
     }
     #endif

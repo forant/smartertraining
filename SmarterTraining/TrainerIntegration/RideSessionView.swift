@@ -1048,6 +1048,10 @@ struct RideSessionView: View {
     #if DEBUG
     /// Builds a RideSessionView frozen in the `.riding` phase with a pre-populated
     /// runtime. For SwiftUI previews / App Store screenshots only.
+    ///
+    /// Also pre-seeds the FTMSManager and HRMManager with the runtime's most
+    /// recent sample so the live metric panel (POWER / HR / CADENCE / SPEED)
+    /// renders real numbers instead of "--".
     init(
         previewRunningWith recommendation: WorkoutRecommendation,
         ftp: Int,
@@ -1061,6 +1065,23 @@ struct RideSessionView: View {
         self.existingEditor = nil
         _phase = State(wrappedValue: .riding)
         _runtime = State(wrappedValue: runtime)
+
+        // Seed live metric publishers from the last synthetic sample.
+        let seedManager = FTMSManager()
+        let seedHRM = HRMManager()
+        if let last = runtime.samples.last {
+            let liveMetrics = TrainerMetrics(
+                power: last.power,
+                cadence: last.cadence,
+                speed: (last.cadence ?? 0) > 0 ? 32.5 : nil,
+                heartRate: last.heartRate,
+                timestamp: Date()
+            )
+            seedManager._previewSetMetrics(liveMetrics)
+            seedHRM.heartRate = last.heartRate
+        }
+        _manager = State(wrappedValue: seedManager)
+        _hrmManager = State(wrappedValue: seedHRM)
     }
 
     /// Builds a RideSessionView frozen in the post-workout summary phase with a

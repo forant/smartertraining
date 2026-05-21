@@ -626,29 +626,16 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    HStack {
-                        Text("Free spots left")
-                            .font(.subheadline)
-                        Spacer()
-                        Text(subscriptionService.isFreeFoundingAvailable ? "Available" : "Full")
-                            .font(.caption)
-                            .foregroundStyle(subscriptionService.isFreeFoundingAvailable ? .green : .red)
-                    }
-
                     Button("Reset Entitlement", role: .destructive) {
                         subscriptionService.debugResetEntitlement()
                     }
 
-                    Button("Simulate Founder Claimed") {
-                        subscriptionService.debugSimulateFounderClaimed()
+                    Button("Simulate Paid Monthly") {
+                        subscriptionService.debugSimulatePaidEntitlement(.paidFounderMonthly)
                     }
 
-                    Button("Set Founder Count Full") {
-                        subscriptionService.debugSetFounderCountFull()
-                    }
-
-                    Button("Set Founder Count Available") {
-                        subscriptionService.debugSetFounderCountAvailable()
+                    Button("Simulate Paid Annual") {
+                        subscriptionService.debugSimulatePaidEntitlement(.paidFounderAnnual)
                     }
                 }
             }

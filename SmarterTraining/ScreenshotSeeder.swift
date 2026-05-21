@@ -47,6 +47,7 @@ enum ScreenshotSeeder {
         case progression = "-seedProgression"
         case coachSettings = "-seedCoachSettings"
         case postWorkoutSummary = "-seedPostWorkoutSummary"
+        case liveWorkout = "-seedLiveWorkout"
     }
 
     static func build(_ scenario: Scenario) -> ScreenshotSeed {
@@ -57,6 +58,7 @@ enum ScreenshotSeeder {
         case .progression: return progressionSeed()
         case .coachSettings: return coachSettingsSeed()
         case .postWorkoutSummary: return postWorkoutSummarySeed()
+        case .liveWorkout: return liveWorkoutSeed()
         }
     }
 
@@ -201,6 +203,22 @@ enum ScreenshotSeeder {
             coachNotes: .empty,
             approach: .balanced,
             feedback: .right
+        )
+    }
+
+    // MARK: G. Live Workout
+    // No completed ride; just seeds a peak-readiness threshold day. TodayView
+    // auto-opens RideSessionView in the `.riding` phase with a synthetic
+    // mid-workout runtime, so a screenshot captures the live workout screen.
+    private static func liveWorkoutSeed() -> ScreenshotSeed {
+        ScreenshotSeed(
+            profile: ScreenshotFactory.powerAthleteProfile(),
+            checkIn: ScreenshotFactory.freshCheckIn(timeAvailable: 60),
+            history: ScreenshotFactory.realisticRecentHistory(),
+            rides: [],
+            progressionState: ScreenshotFactory.stableProgression(),
+            coachNotes: .empty,
+            approach: .balanced
         )
     }
 

@@ -122,7 +122,6 @@ enum AnalyticsEvent: String, Sendable {
 
     // MARK: - Subscription & Paywall
     case paywallViewed = "paywall_viewed"
-    case freeFounderSelected = "free_founder_selected"
     case purchaseMonthlyTapped = "purchase_monthly_tapped"
     case purchaseAnnualTapped = "purchase_annual_tapped"
     case purchaseSucceeded = "purchase_succeeded"

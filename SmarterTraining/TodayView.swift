@@ -12,6 +12,7 @@ struct TodayView: View {
     @State private var showingUpcomingContextAdd = false
     #if DEBUG
     @State private var showingScreenshotPostWorkout = false
+    @State private var showingScreenshotLiveWorkout = false
     #endif
     @State private var editingUpcomingContextEvent: UpcomingContextEvent?
     @State private var editor: WorkoutEditor?
@@ -92,9 +93,12 @@ struct TodayView: View {
             .onAppear {
                 loadTodayRide()
                 #if DEBUG
-                if ScreenshotSeeder.scenario(from: ProcessInfo.processInfo.arguments) == .postWorkoutSummary,
-                   todayRide != nil {
+                let scenario = ScreenshotSeeder.scenario(from: ProcessInfo.processInfo.arguments)
+                if scenario == .postWorkoutSummary, todayRide != nil {
                     showingScreenshotPostWorkout = true
+                }
+                if scenario == .liveWorkout {
+                    showingScreenshotLiveWorkout = true
                 }
                 #endif
             }
@@ -108,6 +112,10 @@ struct TodayView: View {
                     )
                     .environment(appState)
                 }
+            }
+            .fullScreenCover(isPresented: $showingScreenshotLiveWorkout) {
+                liveWorkoutPreviewSession
+                    .environment(appState)
             }
             #endif
             .onChange(of: showingRideSession) { _, isShowing in
@@ -213,6 +221,76 @@ struct TodayView: View {
             .animation(.easeInOut(duration: 0.3), value: appState.currentRecommendation.title)
         }
     }
+
+    #if DEBUG
+    /// Builds a RideSessionView frozen mid-threshold-interval for the
+    /// `-seedLiveWorkout` screenshot scenario. Uses the same synthetic-sample
+    /// generator as the SwiftUI preview block in RideSessionView.swift.
+    private var liveWorkoutPreviewSession: RideSessionView {
+        let engine = RecommendationEngine()
+        let recommendation = engine.buildWorkout(
+            type: .quality,
+            subtype: .threshold,
+            time: 45,
+            reason: "Threshold work builds the ceiling: sustained efforts right at your limit."
+        )
+        let ftp = appState.userProfile.ftp ?? 240
+        let trainerSteps = WorkoutConverter.convert(recommendation: recommendation, ftp: ftp)
+
+        let startedAgo: TimeInterval = 18 * 60
+        let stepElapsed: TimeInterval = 2 * 60 + 15
+        let intervalStepIndex = max(0, trainerSteps.firstIndex { $0.name.contains("Interval 2") } ?? 3)
+
+        let now = Date()
+        let samples: [TrainerMetrics] = stride(from: 0, to: Int(startedAgo), by: 1).map { second in
+            let t = TimeInterval(second)
+            let wobble = Double(((second * 9301) + 49297) % 233) / 233.0
+            let noise = (wobble - 0.5) * 2.0
+            let power: Int
+            let hr: Int
+            let cadence: Double
+            if t < 600 {
+                let p = t / 600.0
+                power = Int(120 + 80 * p + noise * 6)
+                hr = Int(108 + 40 * p + noise * 3)
+                cadence = 85 + noise * 2
+            } else {
+                let cycle = Int((t - 600) / 480)
+                let onInterval = ((t - 600).truncatingRemainder(dividingBy: 480)) < 300
+                if onInterval {
+                    power = Int(Double(ftp) * 0.975) + Int(noise * 8)
+                    hr = Int(165 + Double(cycle) * 2 + noise * 3)
+                    cadence = 90 + noise * 2
+                } else {
+                    power = Int(Double(ftp) * 0.55) + Int(noise * 6)
+                    hr = Int(150 - Double(cycle) + noise * 3)
+                    cadence = 85 + noise * 3
+                }
+            }
+            return TrainerMetrics(
+                power: power,
+                cadence: cadence,
+                speed: nil,
+                heartRate: hr,
+                timestamp: now.addingTimeInterval(t - startedAgo)
+            )
+        }
+
+        let runtime = TrainerWorkoutRuntime.previewMidWorkout(
+            steps: trainerSteps,
+            currentStepIndex: intervalStepIndex,
+            stepElapsed: stepElapsed,
+            totalElapsed: startedAgo,
+            samples: samples
+        )
+
+        return RideSessionView(
+            previewRunningWith: recommendation,
+            ftp: ftp,
+            runtime: runtime
+        )
+    }
+    #endif
 
     private func loadTodayRide() {
         todayRide = appState.store.finishedRides().first {

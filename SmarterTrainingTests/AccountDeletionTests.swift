@@ -115,8 +115,8 @@ struct AccountDeletionTests {
     @Test func subscriptionClearLocalEntitlement() {
         let service = SubscriptionService()
         #if DEBUG
-        service.debugSimulateFounderClaimed()
-        #expect(service.entitlement == .freeFounder)
+        service.debugSimulatePaidEntitlement(.paidFounderMonthly)
+        #expect(service.entitlement == .paidFounderMonthly)
         #endif
 
         service.clearLocalEntitlement()

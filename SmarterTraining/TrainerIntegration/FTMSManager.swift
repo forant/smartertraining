@@ -26,6 +26,13 @@ final class FTMSManager: NSObject, CBCentralManagerDelegate, CBPeripheralDelegat
 
     // MARK: - Public API
 
+    #if DEBUG
+    /// Debug-only path: pre-seed the live metrics for SwiftUI previews / screenshots.
+    func _previewSetMetrics(_ metrics: TrainerMetrics) {
+        self.metrics = metrics
+    }
+    #endif
+
     func startScanning() {
         guard centralManager.state == .poweredOn else { return }
         discoveredDevices.removeAll()

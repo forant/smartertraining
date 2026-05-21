@@ -41,7 +41,7 @@ struct ContentView: View {
 #Preview {
     let service = SubscriptionService()
     #if DEBUG
-    service.debugSimulateFounderClaimed()
+    service.debugSimulatePaidEntitlement(.paidFounderMonthly)
     #endif
     return ContentView(subscriptionService: service)
         .environment(AppState())
